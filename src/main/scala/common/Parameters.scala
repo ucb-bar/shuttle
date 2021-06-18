@@ -17,10 +17,13 @@ case class ShuttleCoreParams(
 
 ) extends CoreParams
 {
+  override def minFLen: Int = 16
+
   val bootFreqHz: BigInt = 0
   val decodeWidth: Int = 4
   val fetchWidth: Int = 4
-  val fpu: Option[freechips.rocketchip.tile.FPUParams] = Some(FPUParams(sfmaLatency=4, dfmaLatency=4, divSqrt=true))
+  val fpu: Option[freechips.rocketchip.tile.FPUParams] = Some(FPUParams(minFLen = 16,
+    sfmaLatency=4, dfmaLatency=4, divSqrt=true))
   val haveBasicCounters: Boolean = true
   val haveCFlush: Boolean = false
   val haveFSDirty: Boolean = true

@@ -13,7 +13,8 @@ class ShuttleUOP(implicit p: Parameters) extends CoreBundle {
   val inst = UInt(32.W)
   val raw_inst = UInt(32.W)
   val pc = UInt(vaddrBitsExtended.W)
-  val ctrl = new IntCtrlSigs()
+  val ctrl = new IntCtrlSigs
+  val fp_ctrl = new FPUCtrlSigs
   val rvc = Bool()
 
   val btb_resp = new BTBResp
@@ -25,25 +26,11 @@ class ShuttleUOP(implicit p: Parameters) extends CoreBundle {
 
   val needs_replay = Bool()
 
-  val wide_rs1_data = UInt(65.W)
-  val wide_rs2_data = UInt(65.W)
-  val wide_rs3_data = UInt(65.W)
+  val rs1_data = UInt(64.W)
+  val rs2_data = UInt(64.W)
+  val rs3_data = UInt(64.W)
 
-  def rs1_data = wide_rs1_data(63,0)
-  def rs2_data = wide_rs2_data(63,0)
-  def set_rs1_data(d: UInt) = { wide_rs1_data := d & ~(0.U(64.W)) }
-  def set_rs2_data(d: UInt) = { wide_rs2_data := d & ~(0.U(64.W)) }
-
-
-  def frs1_data = wide_rs1_data
-  def frs2_data = wide_rs2_data
-  def frs3_data = wide_rs3_data
-
-  
-  val wdata_valid = Bool()
-  val wide_wdata_bits = UInt(65.W)
-  def wdata_bits = wide_wdata_bits(63,0)
-  def set_wdata_bits(d: UInt) = { wide_wdata_bits := d & ~(0.U(64.W)) }
+  val wdata = Valid(UInt(64.W))
 
   val RD_MSB  = 11
   val RD_LSB  = 7
@@ -59,6 +46,14 @@ class ShuttleUOP(implicit p: Parameters) extends CoreBundle {
   def rs3 = inst(RS3_MSB, RS3_LSB)
   def rd = inst(RD_MSB, RD_LSB)
 
+  val fra1 = UInt(5.W)
+  val fra2 = UInt(5.W)
+  val fra3 = UInt(5.W)
+
+  val fexc = UInt(FPConstants.FLAGS_SZ.W)
+
+  val fdivin = new FPInput
+
   def mem_size = inst(13,12)
   def csr_en = ctrl.csr.isOneOf(CSR.S, CSR.C, CSR.W)
   def csr_ren = ctrl.csr.isOneOf(CSR.S, CSR.C) && rs1 === 0.U
@@ -68,4 +63,5 @@ class ShuttleUOP(implicit p: Parameters) extends CoreBundle {
   def wfi = inst === WFI
 
   def uses_brjmp = ctrl.branch || ctrl.jal || ctrl.jalr || sfence
+  def uses_alu = ctrl.wxd && !ctrl.mem && !ctrl.div && !ctrl.mul && !csr_en && !ctrl.fp
 }

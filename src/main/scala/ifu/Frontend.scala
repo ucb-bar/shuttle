@@ -36,6 +36,7 @@ class ShuttleFetchBundle(implicit val p: Parameters) extends Bundle
   val insts         = Output(Vec(fetchWidth, Bits(32.W)))
   val exp_insts     = Output(Vec(fetchWidth, Bits(32.W)))
   val ctrl_sigs     = Output(Vec(fetchWidth, new IntCtrlSigs()))
+  val fp_ctrl_sigs  = Output(Vec(fetchWidth, new FPUCtrlSigs()))
   val pcs           = Output(Vec(fetchWidth, UInt(vaddrBitsExtended.W)))
   val mask          = Output(UInt(fetchWidth.W)) // mark which words are valid instructions
   val btb_resp      = Output(new BTBResp)
@@ -226,6 +227,11 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
 
   require(fetchWidth == 4)
   def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
+  def fp_decode(inst: UInt) = {
+    val fp_decoder = Module(new FPUDecoder)
+    fp_decoder.io.inst := inst
+    fp_decoder.io.sigs
+  }
 
   val icache_data  = icache.io.resp.bits
   for (i <- 0 until fetchWidth) {
@@ -238,34 +244,44 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
     if (i == 0) {
       valid := true.B
       when (f2_prev_is_half) {
+        val expanded = ExpandRVC(Cat(icache_data(15,0), f2_prev_half))
         f2_fetch_bundle.insts(i)     := Cat(icache_data(15,0), f2_prev_half)
-        f2_fetch_bundle.exp_insts(i) := ExpandRVC(Cat(icache_data(15,0), f2_prev_half))
-        f2_fetch_bundle.ctrl_sigs(i).decode(ExpandRVC(Cat(icache_data(15,0), f2_prev_half)), decode_table)
+        f2_fetch_bundle.exp_insts(i) := expanded
+        f2_fetch_bundle.ctrl_sigs(i).decode(expanded, decode_table)
+        f2_fetch_bundle.fp_ctrl_sigs(i) := fp_decode(expanded)
         f2_fetch_bundle.edge_inst    := true.B
       } .otherwise {
+        val expanded = ExpandRVC(icache_data(31,0))
         f2_fetch_bundle.insts(i)     := icache_data(31,0)
-        f2_fetch_bundle.exp_insts(i) := ExpandRVC(icache_data(31,0))
-        f2_fetch_bundle.ctrl_sigs(i).decode(ExpandRVC(icache_data(31,0)), decode_table)
+        f2_fetch_bundle.exp_insts(i) := expanded
+        f2_fetch_bundle.ctrl_sigs(i).decode(expanded, decode_table)
+        f2_fetch_bundle.fp_ctrl_sigs(i) := fp_decode(expanded)
         f2_fetch_bundle.edge_inst    := false.B
       }
     } else if (i == 1) {
       // Need special case since 0th instruction may carry over the wrap around
       val inst = icache_data(47,16)
+      val expanded = ExpandRVC(inst)
       f2_fetch_bundle.insts(i)     := inst
-      f2_fetch_bundle.exp_insts(i) := ExpandRVC(inst)
-      f2_fetch_bundle.ctrl_sigs(i).decode(ExpandRVC(inst), decode_table)
+      f2_fetch_bundle.exp_insts(i) := expanded
+      f2_fetch_bundle.ctrl_sigs(i).decode(expanded, decode_table)
+      f2_fetch_bundle.fp_ctrl_sigs(i) := fp_decode(expanded)
       valid := f2_prev_is_half || !(f2_inst_mask(i-1) && !isRVC(f2_fetch_bundle.insts(i-1)))
     } else if (i == fetchWidth - 1) {
       val inst = Cat(0.U(16.W), icache_data(fetchWidth*16-1,(fetchWidth-1)*16))
+      val expanded = ExpandRVC(inst)
       f2_fetch_bundle.insts(i)     := inst
-      f2_fetch_bundle.exp_insts(i) := ExpandRVC(inst)
-      f2_fetch_bundle.ctrl_sigs(i).decode(ExpandRVC(inst), decode_table)
+      f2_fetch_bundle.exp_insts(i) := expanded
+      f2_fetch_bundle.ctrl_sigs(i).decode(expanded, decode_table)
+      f2_fetch_bundle.fp_ctrl_sigs(i) := fp_decode(expanded)
       valid := !((f2_inst_mask(i-1) && !isRVC(f2_fetch_bundle.insts(i-1))) || !isRVC(inst))
     } else {
       val inst = icache_data(i*16+32-1,i*16)
+      val expanded = ExpandRVC(inst)
       f2_fetch_bundle.insts(i)     := inst
-      f2_fetch_bundle.exp_insts(i) := ExpandRVC(inst)
-      f2_fetch_bundle.ctrl_sigs(i).decode(ExpandRVC(inst), decode_table)
+      f2_fetch_bundle.exp_insts(i) := expanded
+      f2_fetch_bundle.ctrl_sigs(i).decode(expanded, decode_table)
+      f2_fetch_bundle.fp_ctrl_sigs(i) := fp_decode(expanded)
       valid := !(f2_inst_mask(i-1) && !isRVC(f2_fetch_bundle.insts(i-1)))
     }
   }
