@@ -48,6 +48,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     val valid = Bool()
     val dst = UInt(5.W)
     val data = UInt(65.W)
+    val can_bypass = Bool()
   }
 
   val ex_bypasses: Seq[Bypass] = Seq.fill(retireWidth) { Wire(new Bypass) }
@@ -159,7 +160,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     val bypass_data = WireInit(0.U(64.W))
     for (b <- bypasses) {
       when (b.valid && b.dst === rs) {
-        bypass_hit := true.B
+        bypass_hit := b.can_bypass
         bypass_data := b.data
       }
     }
@@ -438,8 +439,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     ex_uops(i).bits.wdata.bits := alu.io.out
     ex_uops(i).bits.taken := alu.io.cmp_out
 
-    ex_bypasses(i).valid := ex_uops_reg(i).valid && ex_uops(i).bits.wdata.valid && ex_uops_reg(i).bits.ctrl.wxd
+    ex_bypasses(i).valid := ex_uops_reg(i).valid && ex_uops_reg(i).bits.ctrl.wxd
     ex_bypasses(i).dst := ex_uops_reg(i).bits.rd
+    ex_bypasses(i).can_bypass := ex_uops(i).bits.wdata.valid
     ex_bypasses(i).data := alu.io.out
 
     when (ex_uops_reg(i).valid && ctrl.mem) {
@@ -565,8 +567,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     mem_uops(i).bits.fexc := fpiu.io.out.bits.exc
     mem_uops(i).bits.fdivin := fpiu.io.out.bits.in
 
-    mem_bypasses(i).valid := mem_uops_reg(i).valid && mem_uops_reg(i).bits.wdata.valid && mem_uops_reg(i).bits.ctrl.wxd
+    mem_bypasses(i).valid := mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.wxd
     mem_bypasses(i).dst := mem_uops_reg(i).bits.rd
+    mem_bypasses(i).can_bypass := mem_uops_reg(i).bits.wdata.valid
     mem_bypasses(i).data := mem_uops_reg(i).bits.wdata.bits
 
     when (RegNext(mem_uops(i).valid && ctrl.mem && (!mem_fire(i) || flush_mem(i)))) {
@@ -704,8 +707,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       csr_fcsr_flags(0) := wb_fp_uop.bits.fexc
     }
 
-    wb_bypasses(i).valid := wb_uops_reg(i).valid && wb_uops_reg(i).bits.wdata.valid && wb_uops_reg(i).bits.ctrl.wxd
+    wb_bypasses(i).valid := wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.wxd
     wb_bypasses(i).dst := wb_uops_reg(i).bits.rd
+    wb_bypasses(i).can_bypass := wb_uops_reg(i).bits.wdata.valid
     wb_bypasses(i).data := wb_uops_reg(i).bits.wdata.bits
 
 
