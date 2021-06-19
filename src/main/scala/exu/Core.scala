@@ -73,9 +73,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   mem_stall.foreach(_ := false.B)
   wb_stall.foreach(_ := false.B)
 
-  val rrd_fire = (rrd_uops zip rrd_stall) map { case (u, s) => u.valid && !s && !ex_stall.reduce(_||_)}
-  val ex_fire = (ex_uops_reg zip ex_stall) map { case (u, s) => u.valid && !s && !mem_stall.reduce(_||_) }
-  val mem_fire = (mem_uops_reg zip mem_stall) map { case (u, s) => u.valid && !s && !wb_stall.reduce(_||_) }
+  val rrd_fire = (rrd_uops zip rrd_stall) map { case (u, s) => u.valid && !s }// && !ex_stall.reduce(_||_)}
+  val ex_fire = (ex_uops_reg zip ex_stall) map { case (u, s) => u.valid && !s }//&& !mem_stall.reduce(_||_) }
+  val mem_fire = (mem_uops_reg zip mem_stall) map { case (u, s) => u.valid && !s }//&& !wb_stall.reduce(_||_) }
   val wb_fire = (wb_uops_reg zip wb_stall) map { case (u, s) => u.valid && !s }
 
   val ex_bsy = ex_uops_reg.map(_.valid).reduce(_||_)
@@ -129,7 +129,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   }
 
   for (i <- 0 until retireWidth) {
-    io.imem.resp(i).ready := rrd_fire(i)
+    io.imem.resp(i).ready := !rrd_stall(i)//rrd_fire(i)
   }
   val iregfile = Reg(Vec(32, UInt(64.W)))
   val isboard = Reg(Vec(32, Bool()))
@@ -180,14 +180,17 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
 
     val rs1_older_hazard = !isboard(rs1) && !rs1_hit
     val rs2_older_hazard = !isboard(rs2) && !rs2_hit
+    val rd_older_hazard  = !isboard(rd)
 
     val rs1_same_hazard = rrd_irf_writes.take(i).map(w => w.valid && w.bits === rs1).orR
     val rs2_same_hazard = rrd_irf_writes.take(i).map(w => w.valid && w.bits === rs2).orR
+    val rd_same_hazard  = rrd_irf_writes.take(i).map(w => w.valid && w.bits === rd).orR
 
     val rs1_data_hazard = (rs1_older_hazard || rs1_same_hazard) && ctrl.rxs1 && rs1 =/= 0.U
     val rs2_data_hazard = (rs2_older_hazard || rs2_same_hazard) && ctrl.rxs2 && rs2 =/= 0.U
+    val rd_data_hazard  = (rd_older_hazard || rd_same_hazard) && ctrl.wxd && rd =/= 0.U
 
-    rrd_stall_data(i) := (rs1_data_hazard || rs2_data_hazard)
+    rrd_stall_data(i) := (rs1_data_hazard || rs2_data_hazard || rd_data_hazard)
 
     rrd_irf_writes(i).valid := rrd_uops(i).valid && rrd_uops(i).bits.ctrl.wxd
     rrd_irf_writes(i).bits := rrd_uops(i).bits.rd
@@ -235,7 +238,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       (ctrl.fp && rrd_found_fp) ||
       rrd_fence_stall ||
       rrd_found_system_insn
-    ) || rrd_older_stalled || csr.io.csr_stall
+    ) || rrd_older_stalled || csr.io.csr_stall || ex_stall.reduce(_||_)
     rrd_older_stalled = rrd_older_stalled || rrd_stall(i) || (rrd_uops(i).valid && (
       uop.xcpt || uop.csr_en
     ))
@@ -299,11 +302,13 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   val frs1_older_hazard = !fsboard(ex_frs1)
   val frs2_older_hazard = !fsboard(ex_frs2)
   val frs3_older_hazard = !fsboard(ex_frs3)
+  val frd_older_hazard = !fsboard(ex_frd)
 
   val frs1_data_hazard = frs1_older_hazard && ex_fp_uop.bits.ctrl.rfs1
   val frs2_data_hazard = frs2_older_hazard && ex_fp_uop.bits.ctrl.rfs2
   val frs3_data_hazard = frs3_older_hazard && ex_fp_uop.bits.ctrl.rfs3
-  val ex_stall_fp_data = (frs1_data_hazard || frs2_data_hazard || frs3_data_hazard) && ex_fp_val
+  val frd_data_hazard = frd_older_hazard && ex_fp_uop.bits.ctrl.wfd
+  val ex_stall_fp_data = (frs1_data_hazard || frs2_data_hazard || frs3_data_hazard || frd_data_hazard) && ex_fp_val
 
   def fuInput(minT: Option[FType]): FPInput = {
     val req = Wire(new FPInput)
@@ -457,7 +462,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       (!io.dmem.req.ready && ex_uops_reg(i).bits.ctrl.mem) ||
       ex_stall_fp_data ||
       ex_fma_stall
-    ) || ex_older_stalled
+    ) || ex_older_stalled || mem_stall.reduce(_||_)
     ex_older_stalled = ex_older_stalled || ex_stall(i)
     ex_mem_fired = ex_mem_fired || (ex_uops_reg(i).valid && ex_uops_reg(i).bits.ctrl.mem)
   }
@@ -567,7 +572,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   for (i <- 0 until retireWidth) {
     mem_stall(i) := mem_uops_reg(i).valid && (
       false.B
-    ) || mem_older_stalled
+    ) || mem_older_stalled || wb_stall.reduce(_||_)
     mem_older_stalled = mem_older_stalled || mem_stall(i)
   }
 
@@ -585,27 +590,11 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   }
 
   //wb
-  val wb_irf_writes = Wire(Vec(retireWidth, Valid(UInt(5.W))))
-  for (i <- 0 until retireWidth) {
-    val fp_ctrl = wb_uops(i).bits.fp_ctrl
-    val ctrl = wb_uops(i).bits.ctrl
-    val rd = wb_uops(i).bits.rd
-    val rd_older_hazard  = !isboard(rd)
-    val rd_same_hazard  = wb_irf_writes.take(i).map(w => w.valid && w.bits === rd).orR
-    val rd_data_hazard  = (rd_older_hazard || rd_same_hazard) && ctrl.wxd && rd =/= 0.U
-
-    wb_irf_writes(i).valid := wb_uops(i).valid && wb_uops(i).bits.ctrl.wxd
-    wb_irf_writes(i).bits := wb_uops(i).bits.rd
-
-  }
-
   val wb_fp_oh = wb_uops_reg.map({u => u.valid && u.bits.ctrl.fp})
   val wb_fp_fire = (wb_fp_oh zip wb_fire).map({ case (h, f) => h && f}).reduce(_||_)
   val wb_fp_uop = Mux1H(wb_fp_oh, wb_uops_reg)
   val wb_fp_ctrl = wb_fp_uop.bits.fp_ctrl
   val wb_fp_divsqrt = wb_fp_oh.reduce(_||_) && (wb_fp_ctrl.div || wb_fp_ctrl.sqrt)
-  val wb_fp_frd = wb_fp_uop.bits.rd
-  val wb_fp_older_hazard  = !fsboard(wb_fp_frd) && wb_fp_uop.bits.ctrl.wfd && wb_fp_oh.reduce(_||_)
   fpus.foreach(_.io.firew := wb_fp_fire)
   fpus.foreach(_.io.killw := false.B)
 
@@ -771,17 +760,23 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   for (i <- 0 until retireWidth) {
     wb_stall(i) := wb_uops_reg(i).valid && (
       wb_found_replay ||
-      wb_fp_divsqrt_stall ||
-      wb_fp_older_hazard
+      wb_fp_divsqrt_stall
     ) || wb_older_stalled
     wb_older_stalled = wb_older_stalled || wb_stall(i)
     wb_found_replay = wb_found_replay || (wb_uops_reg(i).valid && wb_uops_reg(i).bits.needs_replay)
   }
 
+  val wb_replay_stall = Wire(Vec(retireWidth, Bool()))
+  wb_replay_stall.foreach(_ := false.B)
+  var wb_found_valid_non_replay = false.B
+  for (i <- 0 until retireWidth) {
+    wb_replay_stall(i) := wb_found_valid_non_replay
+    wb_found_valid_non_replay = wb_found_valid_non_replay || (wb_uops_reg(i).valid && !wb_uops(i).bits.needs_replay)
+  }
 
 
   for (i <- 0 until retireWidth) {
-    when (wb_fire(i) && wb_uops(i).bits.needs_replay) {
+    when (wb_uops_reg(i).valid && !wb_replay_stall(i) && wb_uops(i).bits.needs_replay) {
       flush_mem .foreach(_ := true.B)
       flush_ex.foreach(_ := true.B)
       flush_rrd .foreach(_ := true.B)
@@ -793,10 +788,16 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       when (wb_uops(i).bits.ctrl.wxd) {
         isboard_wb_set(wb_uops(i).bits.rd) := true.B
       }
+      when (wb_uops(i).bits.ctrl.wfd) {
+        fsboard_wb_set(wb_uops(i).bits.rd) := true.B
+      }
     }
     when (wb_fire(i) && wb_uops(i).bits.xcpt) {
       when (wb_uops(i).bits.ctrl.wxd) {
         isboard_wb_set(wb_uops(i).bits.rd) := true.B
+      }
+      when (wb_uops(i).bits.ctrl.wfd) {
+        fsboard_wb_set(wb_uops(i).bits.rd) := true.B
       }
     }
   }
