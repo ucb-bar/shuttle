@@ -42,7 +42,7 @@ class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
     in_uops(i).bits.next_pc.valid  := io.enq.bits.next_pc.valid && io.enq.bits.btb_resp.bridx === i.U
     in_uops(i).bits.next_pc.bits   := io.enq.bits.next_pc.bits
     in_uops(i).bits.needs_replay   := false.B
-
+    in_uops(i).bits.mem_size       := io.enq.bits.insts(i)(13,12)
 
     in_uops(i).bits.xcpt := io.enq.bits.xcpt_pf_if || io.enq.bits.xcpt_ae_if
     in_uops(i).bits.xcpt_cause := Mux(io.enq.bits.xcpt_pf_if,

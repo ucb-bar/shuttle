@@ -130,7 +130,6 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   val s0_vpc = WireInit(0.U(vaddrBitsExtended.W))
   val s0_valid = WireInit(false.B)
   val s0_is_replay = WireInit(false.B)
-  val s0_is_sfence = WireInit(false.B)
   val s0_replay_resp = Wire(new TLBResp)
   val s0_replay_ppc = Wire(UInt(paddrBits.W))
 
@@ -144,22 +143,21 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   val s1_vpc       = RegNext(s0_vpc)
   val s1_valid     = RegNext(s0_valid, false.B)
   val s1_is_replay = RegNext(s0_is_replay)
-  val s1_is_sfence = RegNext(s0_is_sfence)
   val f1_clear     = WireInit(false.B)
 
-  tlb.io.req.valid      := (s1_valid && !s1_is_replay && !f1_clear) || s1_is_sfence
+  tlb.io.req.valid      := (s1_valid && !s1_is_replay && !f1_clear && !io.cpu.sfence.valid)
   tlb.io.req.bits.cmd   := DontCare
-  tlb.io.req.bits.vaddr := s1_vpc
+  tlb.io.req.bits.vaddr := Mux(io.cpu.sfence.valid, io.cpu.sfence.bits.addr, s1_vpc)
   tlb.io.req.bits.passthrough := false.B
   tlb.io.req.bits.size  := log2Ceil(coreInstBytes * fetchWidth).U
-  tlb.io.sfence         := RegNext(io.cpu.sfence)
+  tlb.io.sfence         := io.cpu.sfence
   tlb.io.kill           := false.B
 
-  btb.io.req.valid := s1_valid && !s1_is_sfence
+  btb.io.req.valid := s1_valid && !io.cpu.sfence.valid
   btb.io.req.bits.addr := s1_vpc
 
 
-  val s1_tlb_miss = !s1_is_replay && tlb.io.resp.miss
+  val s1_tlb_miss = !s1_is_replay && (tlb.io.resp.miss || io.cpu.sfence.valid)
   val s1_tlb_resp = Mux(s1_is_replay, RegNext(s0_replay_resp), tlb.io.resp)
   val s1_ppc  = Mux(s1_is_replay, RegNext(s0_replay_ppc), tlb.io.resp.paddr)
 
@@ -319,16 +317,7 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   io.cpu.resp <> fb.io.deq
   fb.io.clear := false.B
 
-  when (io.cpu.sfence.valid) {
-    fb.io.clear := true.B
-    f2_clear := true.B
-    f2_prev_is_half := false.B
-    f1_clear := true.B
-    s0_valid := false.B
-    s0_vpc := io.cpu.sfence.bits.addr
-    s0_is_replay := false.B
-    s0_is_sfence := true.B
-  } .elsewhen (io.cpu.redirect_flush) {
+  when (io.cpu.redirect_flush) {
     fb.io.clear := true.B
     f2_clear    := true.B
     f2_prev_is_half := false.B

@@ -98,7 +98,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     csr.io.decode(i).csr := rrd_uops(i).bits.inst(31,20)
   }
 
-  val rrd_illegal_insn = Seq.tabulate(retireWidth) { i =>
+  val rrd_illegal_insn = Wire(Vec(retireWidth, Bool()))
+  for (i <- 0 until retireWidth) {
     val uop = rrd_uops(i).bits
     val ctrl = uop.ctrl
     val inst = uop.inst
@@ -111,7 +112,10 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     val csr_wen_illegal = csr_wen && csr.io.decode(i).write_illegal
     val sfence = ctrl.mem && ctrl.mem_cmd === M_SFENCE
     val system_insn = uop.system_insn
-    (!ctrl.legal ||
+
+    rrd_uops(i).bits.flush_pipe := sfence || system_insn || (csr_wen && csr.io.decode(i).write_flush)
+
+    rrd_illegal_insn(i) := (!ctrl.legal ||
       (ctrl.fp && fp_illegal) ||
       (ctrl.rocc && csr.io.decode(i).rocc_illegal) ||
       (csr_en && (csr_ren_illegal || csr_wen_illegal)) ||
@@ -209,6 +213,10 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
         rrd_uops(i).bits.fra3 := rrd_uops(i).bits.rs3
       }
     }
+
+    when (ctrl.mem_cmd.isOneOf(M_SFENCE, M_FLUSH_ALL)) {
+      rrd_uops(i).bits.mem_size := Cat(rs2 =/= 0.U, rs1 =/= 0.U)
+    }
   }
 
   val fsboard_bsy = Wire(Bool())
@@ -253,7 +261,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   for (i <- 0 until retireWidth) {
     when (rrd_fire(i)) {
       ex_uops_reg(i) := rrd_uops(i)
-      when (rrd_uops(i).valid && rrd_uops(i).bits.ctrl.wxd && !flush_rrd(i)) {
+      when (rrd_uops(i).valid && rrd_uops(i).bits.ctrl.wxd && !flush_rrd(i) && !rrd_uops(i).bits.uses_alu) {
         isboard_rrd_clear(rrd_uops(i).bits.rd) := true.B
       }
     } .elsewhen (ex_fire(i)) {
@@ -582,6 +590,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     when (mem_uops(i).valid && mem_uops(i).bits.ctrl.wxd && flush_mem(i)) {
       isboard_mem_set(mem_uops(i).bits.rd) := true.B
     }
+    when (mem_uops(i).valid && mem_uops(i).bits.ctrl.wfd && flush_mem(i)) {
+      fsboard_mem_set(mem_uops(i).bits.rd) := true.B
+    }
     when (mem_fire(i)) {
       wb_uops_reg(i) := mem_uops(i)
     } .elsewhen (wb_fire(i)) {
@@ -617,6 +628,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     when (divSqrt.io.inValid) {
       assert(divSqrt.io.inReady)
       divSqrt_waddr := wb_fp_uop.bits.rd
+      divSqrt_val := true.B
+      divSqrt_wdata.valid := false.B
     }
 
     when (divSqrt.io.outValid_div || divSqrt.io.outValid_sqrt) {
@@ -681,7 +694,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     when (wb_fire(i) && wb_uops(i).bits.ctrl.wxd && !wb_uops(i).bits.xcpt &&
       !wb_uops(i).bits.needs_replay && wb_uops(i).bits.wdata.valid) {
       iregfile(wb_uops(i).bits.rd) := wb_uops(i).bits.wdata.bits
-      isboard_wb_set(wb_uops(i).bits.rd) := true.B
+      when (!wb_uops(i).bits.uses_alu) {
+        isboard_wb_set(wb_uops(i).bits.rd) := true.B
+      }
     }
 
     when (wb_fire(i) && wb_fp_oh(i) && wb_fp_uop.bits.fp_ctrl.toint) {
@@ -734,7 +749,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     io.imem.sfence.bits.asid := wb_uops(0).bits.rs2
   }
 
-  when (wb_fire(0) && wb_uops(0).bits.csr_wen && !wb_uops(0).bits.needs_replay) {
+  when (wb_fire(0) && ((wb_uops(0).bits.csr_wen && !wb_uops(0).bits.needs_replay) ||
+                       wb_uops(0).bits.flush_pipe)) {
     flush_mem .foreach(_ := true.B)
     flush_ex.foreach(_ := true.B)
     flush_rrd .foreach(_ := true.B)

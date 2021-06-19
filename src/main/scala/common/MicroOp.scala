@@ -54,7 +54,9 @@ class ShuttleUOP(implicit p: Parameters) extends CoreBundle {
 
   val fdivin = new FPInput
 
-  def mem_size = inst(13,12)
+  val mem_size = UInt(2.W)
+  val flush_pipe = Bool()
+
   def csr_en = ctrl.csr.isOneOf(CSR.S, CSR.C, CSR.W)
   def csr_ren = ctrl.csr.isOneOf(CSR.S, CSR.C) && rs1 === 0.U
   def csr_wen = csr_en && !csr_ren
