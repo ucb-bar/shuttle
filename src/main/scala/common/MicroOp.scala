@@ -13,6 +13,7 @@ class ShuttleUOP(implicit p: Parameters) extends CoreBundle {
   val inst = UInt(32.W)
   val raw_inst = UInt(32.W)
   val pc = UInt(vaddrBitsExtended.W)
+  val edge_inst = Bool()
   val ctrl = new IntCtrlSigs
   val fp_ctrl = new FPUCtrlSigs
   val rvc = Bool()
