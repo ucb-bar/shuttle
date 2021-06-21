@@ -88,6 +88,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   val flush_ex = WireInit(VecInit(Seq.fill(retireWidth) { false.B }))
   assert(PopCount(flush_ex).isOneOf(0.U, retireWidth.U))
   val flush_mem = WireInit(VecInit(Seq.fill(retireWidth) { false.B }))
+  val flush_wb = WireInit(VecInit(Seq.fill(retireWidth) { false.B }))
 
   io.imem.redirect_val := false.B
   io.imem.redirect_flush := false.B
@@ -248,7 +249,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
 
     val rrd_fence_stall = ((uop.system_insn || ctrl.fence || ctrl.amo || ctrl.fence_i) &&
       (ex_bsy || mem_bsy || wb_bsy || isboard_bsy || fsboard_bsy || !io.dmem.ordered))
-    val is_pipe0 = ctrl.mem || uop.csr_en || uop.sfence || uop.system_insn || ctrl.fence || ctrl.csr =/= CSR.N
+    val is_pipe0 = ctrl.mem || uop.csr_en || uop.sfence || uop.system_insn || ctrl.fence || ctrl.csr =/= CSR.N || uop.xcpt
 
     rrd_stall(i) := rrd_uops(i).valid && (
       rrd_stall_data(i) ||
@@ -276,10 +277,11 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   for (i <- 0 until retireWidth) {
     when (rrd_fire(i)) {
       ex_uops_reg(i) := rrd_uops(i)
-      when (rrd_uops(i).valid && rrd_uops(i).bits.ctrl.wxd && !flush_rrd(i) && !rrd_uops(i).bits.uses_alu) {
+      ex_uops_reg(i).valid := rrd_uops(i).valid && !flush_rrd(i)
+      when (rrd_uops(i).bits.ctrl.wxd && !flush_rrd(i) && !rrd_uops(i).bits.uses_alu) {
         isboard_rrd_clear(rrd_uops(i).bits.rd) := true.B
       }
-    } .elsewhen (ex_fire(i)) {
+    } .elsewhen (ex_fire(i) || flush_ex(i)) {
       ex_uops_reg(i).valid := false.B
     }
   }
@@ -500,11 +502,12 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     }
     when (ex_fire(i)) {
       mem_uops_reg(i) := ex_uops(i)
+      mem_uops_reg(i).valid := ex_uops(i).valid && !flush_ex(i)
       when (ex_uops(i).valid && ex_uops(i).bits.ctrl.wfd && !flush_ex(i)) {
         fsboard_ex_clear(ex_uops(i).bits.rd) := true.B
       }
 
-    } .elsewhen (mem_fire(i)) {
+    } .elsewhen (mem_fire(i) || flush_mem(i)) {
       mem_uops_reg(i).valid := false.B
     }
   }
@@ -614,7 +617,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     }
     when (mem_fire(i)) {
       wb_uops_reg(i) := mem_uops(i)
-    } .elsewhen (wb_fire(i)) {
+      wb_uops_reg(i).valid := mem_uops(i).valid && !flush_mem(i)
+    } .elsewhen (wb_fire(i) || flush_wb(i)) {
       wb_uops_reg(i).valid := false.B
     }
   }
@@ -809,21 +813,23 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     io.imem.sfence.bits.asid := wb_uops(0).bits.rs2
   }
 
-  when (wb_fire(0) && ((wb_uops(0).bits.csr_wen && !wb_uops(0).bits.needs_replay) ||
-                       wb_uops(0).bits.flush_pipe)) {
+  when (wb_uops_reg(0).valid && ((wb_uops(0).bits.csr_wen && !wb_uops(0).bits.needs_replay) ||
+                                  wb_uops(0).bits.flush_pipe)) {
     flush_mem .foreach(_ := true.B)
     flush_ex.foreach(_ := true.B)
     flush_rrd .foreach(_ := true.B)
+    for (i <- 1 until retireWidth) { flush_wb(i) := true.B }
     fpus.foreach(_.io.killw := true.B)
     io.imem.redirect_val := true.B
     io.imem.redirect_flush := true.B
     io.imem.redirect_pc := wb_uops(0).bits.pc + Mux(wb_uops(0).bits.rvc, 2.U, 4.U)
   }
 
-  when (wb_fire(0) && (wb_uops(0).bits.xcpt || csr.io.eret) && !wb_uops(0).bits.needs_replay) {
+  when (wb_uops_reg(0).valid && (wb_uops(0).bits.xcpt || csr.io.eret) && !wb_uops(0).bits.needs_replay) {
     flush_mem .foreach(_ := true.B)
     flush_ex.foreach(_ := true.B)
     flush_rrd .foreach(_ := true.B)
+    for (i <- 1 until retireWidth) { flush_wb(i) := true.B }
     fpus.foreach(_.io.killw := true.B)
     io.imem.redirect_val := true.B
     io.imem.redirect_flush := true.B
@@ -860,19 +866,13 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       flush_mem .foreach(_ := true.B)
       flush_ex.foreach(_ := true.B)
       flush_rrd .foreach(_ := true.B)
+      for (i <- i + 1 until retireWidth) { flush_wb(i) := true.B }
       fpus.foreach(_.io.killw := true.B)
       io.imem.redirect_val := true.B
       io.imem.redirect_flush := true.B
       io.imem.redirect_pc := wb_uops(i).bits.pc
-
-      when (wb_uops(i).bits.ctrl.wxd) {
-        isboard_wb_set(wb_uops(i).bits.rd) := true.B
-      }
-      when (wb_uops(i).bits.ctrl.wfd) {
-        fsboard_wb_set(wb_uops(i).bits.rd) := true.B
-      }
     }
-    when (wb_fire(i) && wb_uops(i).bits.xcpt) {
+    when (wb_fire(i) && (wb_uops(i).bits.xcpt || (!wb_replay_stall(i) && wb_uops(i).bits.needs_replay))) {
       when (wb_uops(i).bits.ctrl.wxd) {
         isboard_wb_set(wb_uops(i).bits.rd) := true.B
       }
@@ -951,16 +951,6 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
 
 
   for (i <- 0 until retireWidth) {
-    when (flush_rrd(i)) {
-      ex_uops_reg(i).valid := false.B
-    }
-    when (flush_ex(i)) {
-      mem_uops_reg(i).valid := false.B
-    }
-    when (flush_mem(i)) {
-      wb_uops_reg(i).valid := false.B
-    }
-
     when (reset.asBool) {
       ex_uops_reg(i).valid := false.B
       mem_uops_reg(i).valid := false.B
