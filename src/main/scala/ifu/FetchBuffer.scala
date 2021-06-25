@@ -9,11 +9,12 @@ import freechips.rocketchip.config.{Parameters}
 import freechips.rocketchip.rocket.{MStatus, BP, BreakpointUnit}
 
 import shuttle.common._
+import shuttle.util._
 
 class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
 {
 
-  val numEntries = 8
+  val numEntries = 7
   val io = IO(new Bundle {
     val enq = Flipped(Decoupled(new ShuttleFetchBundle))
     val deq = Vec(retireWidth, Decoupled(new ShuttleUOP))
@@ -23,12 +24,15 @@ class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
   val ram = Reg(Vec(numEntries, Valid(new ShuttleUOP)))
   val enq_ptr = RegInit(1.U(numEntries.W))
   val deq_ptr = RegInit(1.U(numEntries.W))
-  io.enq.ready := PopCount(ram.map(_.valid)) < (numEntries - fetchWidth).U
+  io.enq.ready := PopCount(ram.map(_.valid)) <= (numEntries - fetchWidth).U
 
   // Input microops.
   val in_uops = Wire(Vec(fetchWidth, Valid(new ShuttleUOP)))
 
   // Step 1: Convert FetchPacket into a vector of MicroOps.
+  val lower = Wire(UInt(fetchWidth.W))
+  lower := MaskLower(io.enq.bits.mask >> 1)
+  val maybe_cfi_mask = io.enq.bits.mask & ~lower
   for (i <- 0 until fetchWidth) {
     in_uops(i).valid               := io.enq.valid && io.enq.bits.mask(i)
     in_uops(i).bits                := DontCare
@@ -39,7 +43,7 @@ class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
     in_uops(i).bits.raw_inst       := io.enq.bits.insts(i)
     in_uops(i).bits.rvc            := io.enq.bits.insts(i)(1,0) =/= 3.U
     in_uops(i).bits.btb_resp       := io.enq.bits.btb_resp
-    in_uops(i).bits.next_pc.valid  := io.enq.bits.next_pc.valid && io.enq.bits.btb_resp.bridx === i.U
+    in_uops(i).bits.next_pc.valid  := io.enq.bits.next_pc.valid && maybe_cfi_mask(i)
     in_uops(i).bits.next_pc.bits   := io.enq.bits.next_pc.bits
     in_uops(i).bits.needs_replay   := false.B
     in_uops(i).bits.mem_size       := io.enq.bits.exp_insts(i)(13,12)

@@ -19,10 +19,10 @@ class WithNShuttleCores(n: Int = 1, overrideIdOffset: Option[Int] = None) extend
           tileParams = ShuttleTileParams(
             core = ShuttleCoreParams(),
             dcache = Some(
-              DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=4, nMSHRs=2, nTLBWays=8)
+              DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=1)
             ),
             icache = Some(
-              ICacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=4, fetchBytes=2*4)
+              ICacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, fetchBytes=2*4)
             ),
             hartId = i + idOffset
           ),
@@ -30,7 +30,6 @@ class WithNShuttleCores(n: Int = 1, overrideIdOffset: Option[Int] = None) extend
         )
       } ++ prev
     }
-    case SystemBusKey => up(SystemBusKey, site).copy(beatBytes = 8)
     case XLen => 64
 })
 

@@ -9,6 +9,7 @@ import freechips.rocketchip.util.{Str}
 import freechips.rocketchip.config.{Parameters}
 import freechips.rocketchip.tile.{TileKey}
 
+// Set all bits at or below the highest order '1'.
 object MaskLower
 {
   def apply(in: UInt) = {
@@ -16,6 +17,16 @@ object MaskLower
     (0 until n).map(i => in >> i.U).reduce(_|_)
   }
 }
+
+// Set all bits at or above the lowest order '1'.
+object MaskUpper
+{
+  def apply(in: UInt) = {
+    val n = in.getWidth
+    (0 until n).map(i => (in << i.U)(n-1,0)).reduce(_|_)
+  }
+}
+
 
 object Sext
 {

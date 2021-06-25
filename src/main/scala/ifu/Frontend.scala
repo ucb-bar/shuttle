@@ -31,7 +31,6 @@ class ShuttleFetchBundle(implicit val p: Parameters) extends Bundle
 {
   val pc            = Output(UInt(vaddrBitsExtended.W))
   val next_pc       = Output(Valid(UInt(vaddrBitsExtended.W)))
-  val next_fetch    = Output(UInt(vaddrBitsExtended.W))
   val edge_inst     = Output(Bool()) // True if 1st instruction in this bundle is pc - 2
   val insts         = Output(Vec(fetchWidth, Bits(32.W)))
   val exp_insts     = Output(Vec(fetchWidth, Bits(32.W)))
@@ -39,7 +38,7 @@ class ShuttleFetchBundle(implicit val p: Parameters) extends Bundle
   val fp_ctrl_sigs  = Output(Vec(fetchWidth, new FPUCtrlSigs()))
   val pcs           = Output(Vec(fetchWidth, UInt(vaddrBitsExtended.W)))
   val mask          = Output(UInt(fetchWidth.W)) // mark which words are valid instructions
-  val btb_resp      = Output(new BTBResp)
+  val btb_resp      = Output(Valid(new BTBResp))
 
   val br_mask       = Output(UInt(fetchWidth.W))
 
@@ -167,7 +166,8 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   val f1_mask = fetchMask(s1_vpc)
 
   val f1_next_fetch = nextFetch(s1_vpc)
-  val f1_predicted_target = Mux(btb.io.resp.valid && btb.io.resp.bits.taken,
+  val f1_do_redirect = btb.io.resp.valid && btb.io.resp.bits.taken
+  val f1_predicted_target = Mux(f1_do_redirect,
     btb.io.resp.bits.target.sextTo(vaddrBitsExtended),
     f1_next_fetch)
 
@@ -196,10 +196,7 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   icache.io.s2_kill := s2_xcpt
 
   val f2_fetch_mask = fetchMask(s2_vpc)
-  val f2_redirects = (0 until fetchWidth) map { i =>
-    false.B
-  }
-  val f2_do_redirect = f2_redirects.reduce(_||_)
+  val f2_do_redirect = RegNext(f1_do_redirect)
   val f2_next_fetch = RegNext(f1_next_fetch)
   val f2_predicted_target = RegNext(f1_predicted_target)
 
@@ -217,11 +214,10 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   f2_fetch_bundle.pc         := s2_vpc
   f2_fetch_bundle.next_pc.valid := s2_btb_resp.valid && s2_btb_resp.bits.taken
   f2_fetch_bundle.next_pc.bits := f2_predicted_target
-  f2_fetch_bundle.next_fetch := f2_next_fetch
   f2_fetch_bundle.xcpt_pf_if := s2_tlb_resp.pf.inst
   f2_fetch_bundle.xcpt_ae_if := s2_tlb_resp.ae.inst
   f2_fetch_bundle.mask       := f2_inst_mask.asUInt
-  f2_fetch_bundle.btb_resp   := s2_btb_resp.bits
+  f2_fetch_bundle.btb_resp   := s2_btb_resp
 
   require(fetchWidth == 4)
   def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)

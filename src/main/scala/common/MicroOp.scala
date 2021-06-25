@@ -18,12 +18,12 @@ class ShuttleUOP(implicit p: Parameters) extends CoreBundle {
   val fp_ctrl = new FPUCtrlSigs
   val rvc = Bool()
 
-  val btb_resp = new BTBResp
+  val btb_resp = Valid(new BTBResp)
   val next_pc = Valid(UInt(vaddrBitsExtended.W))
   val taken = Bool()
 
   val xcpt = Bool()
-  val xcpt_cause = UInt(8.W)
+  val xcpt_cause = UInt(64.W)
 
   val needs_replay = Bool()
 
@@ -64,7 +64,8 @@ class ShuttleUOP(implicit p: Parameters) extends CoreBundle {
   def system_insn = ctrl.csr === CSR.I
   def sfence = ctrl.mem && ctrl.mem_cmd === M_SFENCE
   def wfi = inst === WFI
+  def cfi = ctrl.branch || ctrl.jal || ctrl.jalr
 
-  def uses_brjmp = ctrl.branch || ctrl.jal || ctrl.jalr || sfence
+  def uses_brjmp = cfi || sfence
   def uses_alu = ctrl.wxd && !ctrl.mem && !ctrl.div && !ctrl.mul && !csr_en && !ctrl.fp
 }
