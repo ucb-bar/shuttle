@@ -18,6 +18,7 @@ class WithNShuttleCores(n: Int = 1, overrideIdOffset: Option[Int] = None) extend
         ShuttleTileAttachParams(
           tileParams = ShuttleTileParams(
             core = ShuttleCoreParams(),
+            btb = Some(BTBParams(nEntries=32)),
             dcache = Some(
               DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=1)
             ),

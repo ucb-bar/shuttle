@@ -408,8 +408,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   val ex_mul_oh = ex_uops_reg.map({u => u.valid && u.bits.ctrl.mul})
   val ex_div_val = ex_div_oh.reduce(_||_)
   val ex_mul_val = ex_mul_oh.reduce(_||_)
-  val ex_div_fire = ((ex_div_oh zip ex_fire).map { case (h, f) => h && f }).reduce(_||_)
-  val ex_mul_fire = ((ex_mul_oh zip ex_fire).map { case (h, f) => h && f }).reduce(_||_)
+  val ex_div_fire = (((ex_div_oh zip ex_fire) zip flush_ex).map { case ((h, f), k) => h && f && !k }).reduce(_||_)
+  val ex_mul_fire = (((ex_mul_oh zip ex_fire) zip flush_ex).map { case ((h, f), k) => h && f && !k }).reduce(_||_)
   val ex_div_uop = Mux1H(ex_div_oh, ex_uops_reg)
   val ex_mul_uop = Mux1H(ex_mul_oh, ex_uops_reg)
   val ex_div_stall = ex_div_val && !div.io.req.ready
@@ -470,9 +470,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     ex_uops(i).bits.wdata.bits := alu.io.out
     ex_uops(i).bits.taken := alu.io.cmp_out
 
-    ex_bypasses(i).valid := ex_uops_reg(i).valid && ex_uops_reg(i).bits.ctrl.wxd && !ex_uops_reg(i).bits.ctrl.mem
+    ex_bypasses(i).valid := ex_uops_reg(i).valid && ex_uops_reg(i).bits.ctrl.wxd
     ex_bypasses(i).dst := ex_uops_reg(i).bits.rd
-    ex_bypasses(i).can_bypass := ex_uops(i).bits.wdata.valid
+    ex_bypasses(i).can_bypass := ex_uops(i).bits.wdata.valid && !ex_uops_reg(i).bits.ctrl.mem
     ex_bypasses(i).data := alu.io.out
 
     if (i == 0) {
@@ -530,6 +530,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   val mem_brjmp_val = mem_brjmp_oh.reduce(_||_)
   val mem_brjmp_uop = Mux1H(mem_brjmp_oh, mem_uops_reg).bits
   val mem_brjmp_ctrl = mem_brjmp_uop.ctrl
+  val mem_brjmp_call = (mem_brjmp_ctrl.jalr || mem_brjmp_ctrl.jal) && mem_brjmp_uop.rd === 1.U
+  val mem_brjmp_ret = mem_brjmp_ctrl.jalr && mem_brjmp_uop.rs1 === 1.U && mem_brjmp_uop.rd === 0.U
   val mem_brjmp_target = mem_brjmp_uop.pc.asSInt +
     Mux(mem_brjmp_ctrl.branch && mem_brjmp_uop.taken, ImmGen(IMM_SB, mem_brjmp_uop.inst),
     Mux(mem_brjmp_ctrl.jal, ImmGen(IMM_UJ, mem_brjmp_uop.inst),
@@ -543,7 +545,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   val mem_brjmp_mispredict_not_taken = ((mem_brjmp_ctrl.branch && !mem_brjmp_uop.taken) || !mem_brjmp_uop.cfi) && mem_brjmp_uop.next_pc.valid
   val mem_brjmp_mispredict = mem_brjmp_mispredict_taken || mem_brjmp_mispredict_not_taken
 
-  io.imem.btb_update.valid := mem_brjmp_val && mem_brjmp_mispredict
+  io.imem.btb_update.valid := mem_brjmp_val
+  io.imem.btb_update.bits.mispredict := mem_brjmp_mispredict
   io.imem.btb_update.bits.isValid := mem_brjmp_val
   io.imem.btb_update.bits.cfiType := (
     Mux((mem_brjmp_ctrl.jal || mem_brjmp_ctrl.jalr) && mem_brjmp_uop.rd(0), CFIType.call,
@@ -551,7 +554,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     Mux(mem_brjmp_ctrl.jal || mem_brjmp_ctrl.jalr, CFIType.jump,
     CFIType.branch)))
   )
-  val mem_brjmp_bridx = mem_brjmp_uop.pc(log2Ceil(coreInstBytes*fetchWidth),1)
+  val mem_brjmp_bridx = (mem_brjmp_uop.pc >> 1)(log2Ceil(fetchWidth)-1,0)
   val mem_brjmp_is_last_over_edge = mem_brjmp_bridx === (fetchWidth-1).U && !mem_brjmp_uop.rvc
   io.imem.btb_update.bits.target := mem_brjmp_npc
   io.imem.btb_update.bits.br_pc := mem_brjmp_uop.pc + Mux(mem_brjmp_is_last_over_edge, 2.U, 0.U)
@@ -568,6 +571,10 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   io.imem.bht_update.bits.branch := mem_brjmp_ctrl.branch
   io.imem.bht_update.bits.prediction := mem_brjmp_uop.btb_resp.bits.bht
 
+  io.imem.ras_update.valid := mem_brjmp_call && mem_brjmp_val
+  io.imem.ras_update.bits.head := Mux(mem_brjmp_uop.ras_head === (mem_brjmp_uop.nRAS-1).U, 0.U, mem_brjmp_uop.ras_head + 1.U)
+  io.imem.ras_update.bits.addr := mem_brjmp_uop.wdata.bits
+
   when (mem_brjmp_val && mem_brjmp_mispredict) {
     val valids = MaskLower(VecInit(mem_brjmp_oh).asUInt)
     flush_rrd .foreach(_ := true.B)
@@ -577,6 +584,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     io.imem.redirect_val := true.B
     io.imem.redirect_flush := true.B
     io.imem.redirect_pc := mem_brjmp_npc
+    io.imem.redirect_ras_head := Mux(mem_brjmp_call, Mux(mem_brjmp_uop.ras_head === (mem_brjmp_uop.nRAS-1).U, 0.U, mem_brjmp_uop.ras_head + 1.U),
+      Mux(mem_brjmp_ret, Mux(mem_brjmp_uop.ras_head === 0.U, (mem_brjmp_uop.nRAS-1).U, mem_brjmp_uop.ras_head - 1.U), mem_brjmp_uop.ras_head))
   }
 
   for (i <- 0 until retireWidth) {
@@ -596,9 +605,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     mem_uops(i).bits.fexc := fpiu.io.out.bits.exc
     mem_uops(i).bits.fdivin := fpiu.io.out.bits.in
 
-    mem_bypasses(i).valid := mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.wxd && !mem_uops_reg(i).bits.ctrl.mem
+    mem_bypasses(i).valid := mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.wxd
     mem_bypasses(i).dst := mem_uops_reg(i).bits.rd
-    mem_bypasses(i).can_bypass := mem_uops_reg(i).bits.wdata.valid
+    mem_bypasses(i).can_bypass := mem_uops_reg(i).bits.wdata.valid && !mem_uops_reg(i).bits.ctrl.mem
     mem_bypasses(i).data := mem_uops_reg(i).bits.wdata.bits
   }
 
@@ -780,9 +789,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       csr_fcsr_flags(0) := wb_fp_uop.bits.fexc
     }
 
-    wb_bypasses(i).valid := wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.wxd && !wb_uops_reg(i).bits.ctrl.mem
+    wb_bypasses(i).valid := wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.wxd
     wb_bypasses(i).dst := wb_uops_reg(i).bits.rd
-    wb_bypasses(i).can_bypass := wb_uops_reg(i).bits.wdata.valid
+    wb_bypasses(i).can_bypass := wb_uops_reg(i).bits.wdata.valid && !wb_uops_reg(i).bits.ctrl.mem
     wb_bypasses(i).data := wb_uops_reg(i).bits.wdata.bits
 
 
@@ -836,6 +845,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     io.imem.redirect_val := true.B
     io.imem.redirect_flush := true.B
     io.imem.redirect_pc := wb_uops(0).bits.pc + Mux(wb_uops(0).bits.rvc, 2.U, 4.U)
+    io.imem.redirect_ras_head := wb_uops(0).bits.ras_head
   }
 
   when (wb_uops_reg(0).valid && (wb_uops(0).bits.xcpt || csr.io.eret) && !wb_uops(0).bits.needs_replay) {
@@ -847,6 +857,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     io.imem.redirect_val := true.B
     io.imem.redirect_flush := true.B
     io.imem.redirect_pc := csr.io.evec
+    io.imem.redirect_ras_head := wb_uops(0).bits.ras_head
   }
 
 
@@ -884,6 +895,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       io.imem.redirect_val := true.B
       io.imem.redirect_flush := true.B
       io.imem.redirect_pc := wb_uops(i).bits.pc
+      io.imem.redirect_ras_head := wb_uops(i).bits.ras_head
     }
     when (wb_fire(i) && (wb_uops(i).bits.xcpt || (!wb_replay_stall(i) && wb_uops(i).bits.needs_replay))) {
       when (wb_uops(i).bits.ctrl.wxd) {

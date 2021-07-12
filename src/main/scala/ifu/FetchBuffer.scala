@@ -14,7 +14,7 @@ import shuttle.util._
 class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
 {
 
-  val numEntries = 7
+  val numEntries = 8
   val io = IO(new Bundle {
     val enq = Flipped(Decoupled(new ShuttleFetchBundle))
     val deq = Vec(retireWidth, Decoupled(new ShuttleUOP))
@@ -24,7 +24,7 @@ class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
   val ram = Reg(Vec(numEntries, Valid(new ShuttleUOP)))
   val enq_ptr = RegInit(1.U(numEntries.W))
   val deq_ptr = RegInit(1.U(numEntries.W))
-  io.enq.ready := PopCount(ram.map(_.valid)) <= (numEntries - fetchWidth).U
+  io.enq.ready := PopCount(ram.map(_.valid)) +& PopCount(io.enq.bits.mask) <= numEntries.U
 
   // Input microops.
   val in_uops = Wire(Vec(fetchWidth, Valid(new ShuttleUOP)))
@@ -47,6 +47,7 @@ class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
     in_uops(i).bits.next_pc.bits   := io.enq.bits.next_pc.bits
     in_uops(i).bits.needs_replay   := false.B
     in_uops(i).bits.mem_size       := io.enq.bits.exp_insts(i)(13,12)
+    in_uops(i).bits.ras_head       := io.enq.bits.ras_head
 
     in_uops(i).bits.xcpt := io.enq.bits.xcpt_pf_if || io.enq.bits.xcpt_ae_if
     in_uops(i).bits.edge_inst := (i == 0).B && io.enq.bits.edge_inst

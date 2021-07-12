@@ -10,6 +10,7 @@ import freechips.rocketchip.util._
 
 
 class ShuttleUOP(implicit p: Parameters) extends CoreBundle {
+  val nRAS = tileParams.btb.get.nRAS
   val inst = UInt(32.W)
   val raw_inst = UInt(32.W)
   val pc = UInt(vaddrBitsExtended.W)
@@ -20,6 +21,7 @@ class ShuttleUOP(implicit p: Parameters) extends CoreBundle {
 
   val btb_resp = Valid(new BTBResp)
   val next_pc = Valid(UInt(vaddrBitsExtended.W))
+  val ras_head = UInt(log2Ceil(nRAS).W)
   val taken = Bool()
 
   val xcpt = Bool()

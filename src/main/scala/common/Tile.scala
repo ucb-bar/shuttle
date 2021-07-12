@@ -29,6 +29,7 @@ case class ShuttleTileParams(
   dcache: Option[DCacheParams] = Some(DCacheParams()),
   trace: Boolean = false,
   name: Option[String] = Some("shuttle_tile"),
+  btb: Option[BTBParams] = Some(BTBParams()),
   hartId: Int = 0) extends InstantiableTileParams[ShuttleTile]
 {
   require(icache.isDefined)
@@ -36,7 +37,7 @@ case class ShuttleTileParams(
   def instantiate(crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters): ShuttleTile = {
     new ShuttleTile(this, crossing, lookup)
   }
-  val btb: Option[BTBParams] = Some(BTBParams(nRAS=0))
+
   val beuAddr: Option[BigInt] = None
   val blockerCtrlAddr: Option[BigInt] = None
   val boundaryBuffers: Boolean = false // if synthesized with hierarchical PnR, cut feed-throughs?

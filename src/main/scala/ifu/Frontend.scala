@@ -28,7 +28,10 @@ trait HasShuttleFrontendParameters extends HasL1ICacheParameters
 
 class ShuttleFetchBundle(implicit val p: Parameters) extends Bundle
   with HasShuttleFrontendParameters
+  with HasCoreParameters
 {
+  val btbParams = tileParams.btb.get
+
   val pc            = Output(UInt(vaddrBitsExtended.W))
   val next_pc       = Output(Valid(UInt(vaddrBitsExtended.W)))
   val edge_inst     = Output(Bool()) // True if 1st instruction in this bundle is pc - 2
@@ -39,6 +42,7 @@ class ShuttleFetchBundle(implicit val p: Parameters) extends Bundle
   val pcs           = Output(Vec(fetchWidth, UInt(vaddrBitsExtended.W)))
   val mask          = Output(UInt(fetchWidth.W)) // mark which words are valid instructions
   val btb_resp      = Output(Valid(new BTBResp))
+  val ras_head      = Output(UInt(log2Ceil(btbParams.nRAS).W))
 
   val br_mask       = Output(UInt(fetchWidth.W))
 
@@ -59,16 +63,25 @@ class ShuttleFrontend(val icacheParams: ICacheParams, staticIdForMetadataUseOnly
     UInt(masterNode.edges.out.head.bundle.addressBits.W)))
 }
 
+class RASUpdate(implicit p: Parameters) extends CoreBundle()(p) {
+  val btbParams = tileParams.btb.get
+  val head = UInt(log2Ceil(btbParams.nRAS).W)
+  val addr = UInt(vaddrBitsExtended.W)
+}
+
 class ShuttleFrontendIO(implicit p: Parameters) extends CoreBundle()(p) {
+  val btbParams = tileParams.btb.get
   val redirect_flush = Output(Bool())
   val redirect_val = Output(Bool())
   val redirect_pc = Output(UInt(vaddrBitsExtended.W))
+  val redirect_ras_head = Output(UInt(log2Ceil(btbParams.nRAS).W))
   val sfence = Valid(new SFenceReq)
   val flush_icache = Output(Bool())
   val resp = Flipped(Vec(retireWidth, Decoupled(new ShuttleUOP)))
 
-  val btb_update = Valid(new BTBUpdate)
+  val btb_update = Valid(new ShuttleBTBUpdate)
   val bht_update = Valid(new BHTUpdate)
+  val ras_update = Valid(new RASUpdate)
 
 }
 
@@ -105,19 +118,18 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
     Seq(new IDecode)
   } flatMap(_.table)
 
-
+  val btbParams = tileParams.btb.get
   val icache = outer.icache.module
   icache.io.invalidate := io.cpu.flush_icache
 
   val tlb = Module(new TLB(true, log2Ceil(fetchBytes), TLBConfig(nTLBSets, nTLBWays)))
   io.ptw <> tlb.io.ptw
-  val btb = Module(new BTB)
+  val btb = Module(new ShuttleBTB)
+  val ras = Reg(Vec(btbParams.nRAS, UInt(vaddrBitsExtended.W)))
   // TODO add RAS
   btb.io.flush := false.B
   btb.io.btb_update := io.cpu.btb_update
   btb.io.bht_update := io.cpu.bht_update
-  btb.io.ras_update.valid := false.B
-  btb.io.ras_update.bits := DontCare
   btb.io.bht_advance.valid := false.B
   btb.io.bht_advance.bits := DontCare
 
@@ -128,6 +140,7 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
 
   val s0_vpc = WireInit(0.U(vaddrBitsExtended.W))
   val s0_valid = WireInit(false.B)
+  val s0_ras_head = WireInit(0.U(log2Ceil(btbParams.nRAS).W))
   val s0_is_replay = WireInit(false.B)
   val s0_replay_resp = Wire(new TLBResp)
   val s0_replay_ppc = Wire(UInt(paddrBits.W))
@@ -140,6 +153,7 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   //      Translate VPC
   // --------------------------------------------------------
   val s1_vpc       = RegNext(s0_vpc)
+  val s1_ras_head  = WireInit(RegNext(s0_ras_head))
   val s1_valid     = RegNext(s0_valid, false.B)
   val s1_is_replay = RegNext(s0_is_replay)
   val f1_clear     = WireInit(false.B)
@@ -153,7 +167,7 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   tlb.io.kill           := false.B
 
   btb.io.req.valid := s1_valid && !io.cpu.sfence.valid
-  btb.io.req.bits.addr := s1_vpc
+  btb.io.req.bits.addr := fetchAlign(s1_vpc)
 
 
   val s1_tlb_miss = !s1_is_replay && (tlb.io.resp.miss || io.cpu.sfence.valid)
@@ -176,6 +190,7 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
     s0_valid     := true.B
     s0_vpc       := f1_predicted_target
     s0_is_replay := false.B
+    s0_ras_head  := s1_ras_head
   }
 
   // --------------------------------------------------------
@@ -185,6 +200,7 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   val s2_valid = RegNext(s1_valid && !f1_clear, false.B)
   val s2_vpc   = RegNext(s1_vpc)
   val s2_ppc  = RegNext(s1_ppc)
+  val s2_ras_head = RegNext(s1_ras_head)
   val f2_clear = WireInit(false.B)
   val s2_tlb_resp = RegNext(s1_tlb_resp)
   val s2_tlb_miss = RegNext(s1_tlb_miss)
@@ -196,13 +212,44 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   icache.io.s2_kill := s2_xcpt
 
   val f2_fetch_mask = fetchMask(s2_vpc)
-  val f2_do_redirect = RegNext(f1_do_redirect)
   val f2_next_fetch = RegNext(f1_next_fetch)
-  val f2_predicted_target = RegNext(f1_predicted_target)
 
 
   val f2_aligned_pc = fetchAlign(s2_vpc)
   val f2_inst_mask  = Wire(Vec(fetchWidth, Bool()))
+  val f2_call_mask  = Wire(Vec(fetchWidth, Bool()))
+  val f2_ret_mask   = Wire(Vec(fetchWidth, Bool()))
+  val f2_do_call = (f2_call_mask.asUInt & f2_inst_mask.asUInt) =/= 0.U
+  val f2_do_ret  = (f2_ret_mask.asUInt & f2_inst_mask.asUInt) =/= 0.U
+  val f2_npc_plus4_mask = Wire(Vec(fetchWidth, Bool()))
+
+  val f2_do_redirect = WireInit(false.B)
+  val f2_redirect_bridx = WireInit(0.U(log2Ceil(fetchWidth).W))
+  val f2_predicted_target = Mux(f2_do_redirect,
+    Mux(f2_do_ret, ras(s2_ras_head), RegNext(f1_predicted_target)),
+    RegNext(f1_next_fetch))
+
+
+  val ras_write_val = WireInit(false.B)
+  val ras_write_idx = WireInit(0.U(log2Ceil(btbParams.nRAS).W))
+  val ras_write_addr = WireInit(0.U(vaddrBitsExtended.W))
+  val ras_next_head = Mux(f2_do_call, Mux(s2_ras_head === (btbParams.nRAS-1).U, 0.U, s2_ras_head + 1.U),
+    Mux(f2_do_ret, Mux(s2_ras_head === 0.U, (btbParams.nRAS-1).U, s2_ras_head - 1.U), s2_ras_head))
+  when ((f2_do_call || f2_do_ret) && s2_valid && f3_ready && icache.io.resp.valid) {
+    s0_ras_head := ras_next_head
+    s1_ras_head := ras_next_head
+    when (f2_do_call) {
+      ras_write_val := true.B
+      ras_write_idx := ras_next_head
+      ras_write_addr := f2_aligned_pc + (f2_redirect_bridx << 1) + Mux(f2_npc_plus4_mask(s2_btb_resp.bits.bridx), 4.U, 2.U)
+    }
+  }
+
+  when (io.cpu.ras_update.valid || (RegNext(ras_write_val && !io.cpu.redirect_val) && !io.cpu.redirect_val) ) {
+    val idx = Mux(io.cpu.ras_update.valid, io.cpu.ras_update.bits.head, RegNext(ras_write_idx))
+    val addr = Mux(io.cpu.ras_update.valid, io.cpu.ras_update.bits.addr, RegNext(ras_write_addr))
+    ras(idx) := addr
+  }
 
   // Tracks trailing 16b of previous fetch packet
   val f2_prev_half = Reg(UInt(16.W))
@@ -212,15 +259,23 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   val f2_fetch_bundle = Wire(new ShuttleFetchBundle)
   f2_fetch_bundle            := DontCare
   f2_fetch_bundle.pc         := s2_vpc
-  f2_fetch_bundle.next_pc.valid := s2_btb_resp.valid && s2_btb_resp.bits.taken
+  f2_fetch_bundle.next_pc.valid := f2_do_redirect
   f2_fetch_bundle.next_pc.bits := f2_predicted_target
   f2_fetch_bundle.xcpt_pf_if := s2_tlb_resp.pf.inst
   f2_fetch_bundle.xcpt_ae_if := s2_tlb_resp.ae.inst
   f2_fetch_bundle.mask       := f2_inst_mask.asUInt
   f2_fetch_bundle.btb_resp   := s2_btb_resp
+  f2_fetch_bundle.ras_head   := s2_ras_head
 
   require(fetchWidth == 4)
   def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
+
+  def isJALR(exp_inst: UInt) = exp_inst(6,0) === Instructions.JALR.value.asUInt()(6,0)
+  def isJump(exp_inst: UInt) = exp_inst(6,0) === Instructions.JAL.value.asUInt()(6,0)
+  def isCall(exp_inst: UInt) = (isJALR(exp_inst) || isJump(exp_inst)) && exp_inst(7)
+  def isRet(exp_inst: UInt)  = isJALR(exp_inst) && !exp_inst(7) && BitPat("b00?01") === exp_inst(19,15)
+  def isBr(exp_inst: UInt)  = exp_inst(6,0) === Instructions.BEQ.value.asUInt()(6,0)
+
   def fp_decode(inst: UInt) = {
     val fp_decoder = Module(new FPUDecoder)
     fp_decoder.io.inst := inst
@@ -228,13 +283,27 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   }
 
   val icache_data  = icache.io.resp.bits
+  var redir_found = false.B
   for (i <- 0 until fetchWidth) {
     val valid = Wire(Bool())
-    f2_inst_mask(i) := s2_valid && f2_fetch_mask(i) && valid && !(s2_btb_resp.valid && s2_btb_resp.bits.taken && !s2_btb_resp.bits.mask(i))
+    f2_inst_mask(i) := s2_valid && f2_fetch_mask(i) && valid && !redir_found
     f2_fetch_bundle.pcs(i) := f2_aligned_pc + (i << 1).U - ((f2_fetch_bundle.edge_inst && (i == 0).B) << 1)
     when (!valid && s2_btb_resp.valid && s2_btb_resp.bits.bridx === i.U) {
       btb.io.flush := true.B
     }
+    f2_call_mask(i) := isCall(f2_fetch_bundle.exp_insts(i))
+    f2_ret_mask(i)  := isRet(f2_fetch_bundle.exp_insts(i))
+    f2_npc_plus4_mask(i) := !isRVC(f2_fetch_bundle.insts(i))
+    if (i == 0)
+      f2_npc_plus4_mask(i) := !isRVC(f2_fetch_bundle.insts(i)) && !f2_fetch_bundle.edge_inst
+    val redir_br = (isBr(f2_fetch_bundle.exp_insts(i)) &&
+      ((s2_btb_resp.valid && s2_btb_resp.bits.bridx === i.U && s2_btb_resp.bits.taken && s2_btb_resp.bits.bht.taken)))
+    val redir = f2_inst_mask(i) && (isJALR(f2_fetch_bundle.exp_insts(i)) || isJump(f2_fetch_bundle.exp_insts(i)) || redir_br)
+    when (redir) {
+      f2_do_redirect := true.B
+      f2_redirect_bridx := i.U
+    }
+    redir_found = redir_found || redir
     if (i == 0) {
       valid := true.B
       when (f2_prev_is_half) {
@@ -288,6 +357,7 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
         (s2_valid && icache.io.resp.valid && !f3_ready)) {
     s0_valid := (!s2_tlb_resp.ae.inst && !s2_tlb_resp.pf.inst) || s2_is_replay || s2_tlb_miss
     s0_vpc   := s2_vpc
+    s0_ras_head := s2_ras_head
     s0_is_replay := s2_valid && icache.io.resp.valid
     f1_clear := true.B
   } .elsewhen (s2_valid && f3_ready) {
@@ -298,6 +368,7 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
 
       s0_valid     := !((s2_tlb_resp.ae.inst || s2_tlb_resp.pf.inst) && !s2_is_replay)
       s0_vpc       := f2_predicted_target
+      s0_ras_head  := ras_next_head
       s0_is_replay := false.B
     }
   }
@@ -321,6 +392,7 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
 
     s0_valid     := io.cpu.redirect_val
     s0_vpc       := io.cpu.redirect_pc
+    s0_ras_head  := io.cpu.redirect_ras_head
     s0_is_replay := false.B
   }
 
@@ -329,6 +401,7 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   when (jump_to_reset) {
     s0_valid := true.B
     s0_vpc   := io_reset_vector
+    s0_ras_head := (btbParams.nRAS-1).U
     fb.io.clear := true.B
     f2_clear    := true.B
     f2_prev_is_half := false.B
