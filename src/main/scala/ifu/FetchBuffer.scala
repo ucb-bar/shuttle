@@ -18,6 +18,7 @@ class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
   val io = IO(new Bundle {
     val enq = Flipped(Decoupled(new ShuttleFetchBundle))
     val deq = Vec(retireWidth, Decoupled(new ShuttleUOP))
+    val peek = Vec(retireWidth, Valid(new ShuttleUOP))
 
     val clear = Input(Bool())
   })
@@ -93,6 +94,12 @@ class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
     io.deq(i).valid := out_uop.valid
     io.deq(i).bits := out_uop.bits
     deq_mask = Mux(io.deq(i).fire(), deq_mask | deq_oh, deq_mask)
+    deq_oh = rotateLeft(deq_oh)
+  }
+  for (i <- 0 until retireWidth) {
+    val out_uop = Mux1H(deq_oh, ram)
+    io.peek(i).valid := out_uop.valid
+    io.peek(i).bits := out_uop.bits
     deq_oh = rotateLeft(deq_oh)
   }
   for (i <- 0 until numEntries) {

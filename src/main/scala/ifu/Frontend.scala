@@ -78,6 +78,7 @@ class ShuttleFrontendIO(implicit p: Parameters) extends CoreBundle()(p) {
   val sfence = Valid(new SFenceReq)
   val flush_icache = Output(Bool())
   val resp = Flipped(Vec(retireWidth, Decoupled(new ShuttleUOP)))
+  val peek = Flipped(Vec(retireWidth, Valid(new ShuttleUOP)))
 
   val btb_update = Valid(new ShuttleBTBUpdate)
   val bht_update = Valid(new BHTUpdate)
@@ -355,7 +356,7 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
 
   when ((s2_valid && !icache.io.resp.valid) ||
         (s2_valid && icache.io.resp.valid && !f3_ready)) {
-    s0_valid := (!s2_tlb_resp.ae.inst && !s2_tlb_resp.pf.inst) || s2_is_replay || s2_tlb_miss
+    s0_valid := (!s2_tlb_resp.ae.inst && !s2_tlb_resp.pf.inst) || s2_is_replay || s2_tlb_miss || !f3_ready
     s0_vpc   := s2_vpc
     s0_ras_head := s2_ras_head
     s0_is_replay := s2_valid && icache.io.resp.valid
@@ -382,6 +383,7 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   fb.io.enq.bits := f2_fetch_bundle
   f3_ready := fb.io.enq.ready
   io.cpu.resp <> fb.io.deq
+  io.cpu.peek := fb.io.peek
   fb.io.clear := false.B
 
   when (io.cpu.redirect_flush) {

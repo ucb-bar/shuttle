@@ -182,6 +182,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
 
   val rrd_stall_data = Wire(Vec(retireWidth, Bool()))
   val rrd_irf_writes = Wire(Vec(retireWidth, Valid(UInt(5.W))))
+  val rrd_mem_p0_can_forward = rrd_uops(0).bits.ctrl.wxd && rrd_uops(0).bits.uses_alu
   for (i <- 0 until retireWidth) {
     val fp_ctrl = rrd_uops(i).bits.fp_ctrl
     val ctrl = rrd_uops(i).bits.ctrl
@@ -203,15 +204,37 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     val rs2_older_hazard = !isboard(rs2) && !rs2_hit
     val rd_older_hazard  = !isboard(rd)
 
-    val rs1_same_hazard = rrd_irf_writes.take(i).map(w => w.valid && w.bits === rs1).orR
-    val rs2_same_hazard = rrd_irf_writes.take(i).map(w => w.valid && w.bits === rs2).orR
+    val rs1_w0_hit = rrd_irf_writes(0).valid && rrd_irf_writes(0).bits === rs1
+    val rs2_w0_hit = rrd_irf_writes(0).valid && rrd_irf_writes(0).bits === rs2
+    val rs1_can_forward_from_mem_p0 = (i>0).B && rrd_mem_p0_can_forward && rs1_w0_hit && rrd_uops(i).bits.uses_alu && !rrd_uops(i).bits.cfi && rs1 =/= 0.U
+    val rs2_can_forward_from_mem_p0 = (i>0).B && rrd_mem_p0_can_forward && rs2_w0_hit && rrd_uops(i).bits.uses_alu && !rrd_uops(i).bits.cfi && rs2 =/= 0.U
+
+    val rs1_same_hazard = rrd_irf_writes.take(i).zipWithIndex.map ({case (w,x) => {
+      if (x == 0) {
+        rs1_w0_hit && !rs1_can_forward_from_mem_p0
+      } else {
+        w.valid && w.bits === rs1
+      }
+    }}).orR
+    val rs2_same_hazard = rrd_irf_writes.take(i).zipWithIndex.map ({case (w,x) => {
+      if (x == 0) {
+        rs2_w0_hit && !rs2_can_forward_from_mem_p0
+      } else {
+        w.valid && w.bits === rs2
+      }
+    }}).orR
     val rd_same_hazard  = rrd_irf_writes.take(i).map(w => w.valid && w.bits === rd).orR
 
-    val rs1_data_hazard = (rs1_older_hazard || rs1_same_hazard) && ctrl.rxs1 && rs1 =/= 0.U
-    val rs2_data_hazard = (rs2_older_hazard || rs2_same_hazard) && ctrl.rxs2 && rs2 =/= 0.U
+    val rs1_memalu_hazard = ex_uops_reg.drop(1).map(u => u.valid && u.bits.rd === rs1 && u.bits.uses_memalu).reduce(_||_)
+    val rs2_memalu_hazard = ex_uops_reg.drop(1).map(u => u.valid && u.bits.rd === rs2 && u.bits.uses_memalu).reduce(_||_)
+
+    val rs1_data_hazard = (rs1_older_hazard || rs1_same_hazard || rs1_memalu_hazard) && ctrl.rxs1 && rs1 =/= 0.U
+    val rs2_data_hazard = (rs2_older_hazard || rs2_same_hazard || rs2_memalu_hazard) && ctrl.rxs2 && rs2 =/= 0.U
     val rd_data_hazard  = (rd_older_hazard || rd_same_hazard) && ctrl.wxd && rd =/= 0.U
 
     rrd_stall_data(i) := (rs1_data_hazard || rs2_data_hazard || rd_data_hazard)
+
+    rrd_uops(i).bits.uses_memalu := rrd_uops(i).bits.uses_alu && ((rs1_w0_hit && rs1_can_forward_from_mem_p0) || (rs2_w0_hit && rs2_can_forward_from_mem_p0))
 
     rrd_irf_writes(i).valid := rrd_uops(i).valid && rrd_uops(i).bits.ctrl.wxd
     rrd_irf_writes(i).bits := rrd_uops(i).bits.rd
@@ -397,7 +420,6 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   fpus.foreach(_.io.in_out_tag := ex_fp_ctrl.typeTagOut)
   val ex_fma_stall = fpus.map(!_.io.ready).reduce(_||_)
 
-
   val mulDivParams = tileParams.core.asInstanceOf[ShuttleCoreParams].mulDiv.get
   require(mulDivParams.mulUnroll == 0)
   val div = Module(new MulDiv(mulDivParams, width=64))
@@ -466,13 +488,13 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     alu.io.in2 := ex_op2.asUInt
     alu.io.in1 := ex_op1.asUInt
 
-    ex_uops(i).bits.wdata.valid := uop.uses_alu
+    ex_uops(i).bits.wdata.valid := uop.uses_alu && !uop.uses_memalu
     ex_uops(i).bits.wdata.bits := alu.io.out
     ex_uops(i).bits.taken := alu.io.cmp_out
 
-    ex_bypasses(i).valid := ex_uops_reg(i).valid && ex_uops_reg(i).bits.ctrl.wxd
+    ex_bypasses(i).valid := ex_uops_reg(i).valid && ex_uops_reg(i).bits.ctrl.wxd && !ex_uops_reg(i).bits.ctrl.mem
     ex_bypasses(i).dst := ex_uops_reg(i).bits.rd
-    ex_bypasses(i).can_bypass := ex_uops(i).bits.wdata.valid && !ex_uops_reg(i).bits.ctrl.mem
+    ex_bypasses(i).can_bypass := ex_uops(i).bits.wdata.valid
     ex_bypasses(i).data := alu.io.out
 
     if (i == 0) {
@@ -482,11 +504,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       val size = Mux(ctrl.rocc, log2Ceil(64/8).U, uop.mem_size)
       ex_uops(i).bits.rs2_data := new StoreGen(size, 0.U, uop.rs2_data, coreDataBytes).data
     }
-
    }
-
-
-
 
   var ex_older_stalled = false.B
   val ex_dmem_stall = io.dmem.req.valid && !io.dmem.req.ready
@@ -579,6 +597,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     val valids = MaskLower(VecInit(mem_brjmp_oh).asUInt)
     flush_rrd .foreach(_ := true.B)
     flush_ex.foreach(_ := true.B)
+    fpus.foreach(_.io.in.valid := false.B)
     for (i <- 0 until retireWidth)
       when (!valids(i)) { flush_mem(i) := true.B }
     io.imem.redirect_val := true.B
@@ -605,11 +624,49 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     mem_uops(i).bits.fexc := fpiu.io.out.bits.exc
     mem_uops(i).bits.fdivin := fpiu.io.out.bits.in
 
-    mem_bypasses(i).valid := mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.wxd
+    mem_bypasses(i).valid := mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.wxd && !mem_uops_reg(i).bits.ctrl.mem
     mem_bypasses(i).dst := mem_uops_reg(i).bits.rd
-    mem_bypasses(i).can_bypass := mem_uops_reg(i).bits.wdata.valid && !mem_uops_reg(i).bits.ctrl.mem
+    mem_bypasses(i).can_bypass := mem_uops_reg(i).bits.wdata.valid
     mem_bypasses(i).data := mem_uops_reg(i).bits.wdata.bits
   }
+
+  for (i <- 1 until retireWidth) {
+    val alu = Module(new ALU)
+    val uop = mem_uops_reg(i).bits
+    val ctrl = mem_uops_reg(i).bits.ctrl
+    val imm = ImmGen(ctrl.sel_imm, uop.inst)
+    val sel_alu1 = WireInit(ctrl.sel_alu1)
+    val sel_alu2 = WireInit(ctrl.sel_alu2)
+    val rs1_data = Mux(uop.rs1 === mem_uops_reg(0).bits.rd && mem_uops_reg(0).valid && mem_uops_reg(0).bits.ctrl.wxd,
+      mem_uops_reg(0).bits.wdata.bits,
+      uop.rs1_data)
+    val rs2_data = Mux(uop.rs2 === mem_uops_reg(0).bits.rd && mem_uops_reg(0).valid && mem_uops_reg(0).bits.ctrl.wxd,
+      mem_uops_reg(0).bits.wdata.bits,
+      uop.rs2_data)
+    val ex_op1 = MuxLookup(sel_alu1, 0.S, Seq(
+      A1_RS1 -> rs1_data.asSInt,
+      A1_PC -> uop.pc.asSInt
+    ))
+    val ex_op2 = MuxLookup(sel_alu2, 0.S, Seq(
+      A2_RS2 -> rs2_data.asSInt,
+      A2_IMM -> imm,
+      A2_SIZE -> Mux(uop.rvc, 2.S, 4.S)
+    ))
+    alu.io.dw := ctrl.alu_dw
+    alu.io.fn := ctrl.alu_fn
+    alu.io.in2 := ex_op2.asUInt
+    alu.io.in1 := ex_op1.asUInt
+
+    when (uop.uses_memalu) {
+      mem_uops(i).bits.wdata.valid := true.B
+      mem_uops(i).bits.wdata.bits := alu.io.out
+      mem_bypasses(i).valid := mem_uops_reg(i).bits.ctrl.wxd && mem_uops_reg(i).valid
+      mem_bypasses(i).can_bypass := true.B
+      mem_bypasses(i).data := alu.io.out
+    }
+  }
+
+
 
   when (RegNext(mem_uops(0).valid && mem_uops(0).bits.ctrl.mem && (!mem_fire(0) || flush_mem(0)))) {
     mem_uops(0).bits.needs_replay := true.B
@@ -789,9 +846,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       csr_fcsr_flags(0) := wb_fp_uop.bits.fexc
     }
 
-    wb_bypasses(i).valid := wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.wxd
+    wb_bypasses(i).valid := wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.wxd && !wb_uops_reg(i).bits.ctrl.mem
     wb_bypasses(i).dst := wb_uops_reg(i).bits.rd
-    wb_bypasses(i).can_bypass := wb_uops_reg(i).bits.wdata.valid && !wb_uops_reg(i).bits.ctrl.mem
+    wb_bypasses(i).can_bypass := wb_uops_reg(i).bits.wdata.valid
     wb_bypasses(i).data := wb_uops_reg(i).bits.wdata.bits
 
 
@@ -842,6 +899,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     flush_rrd .foreach(_ := true.B)
     for (i <- 1 until retireWidth) { flush_wb(i) := true.B }
     fpus.foreach(_.io.killw := true.B)
+    fpus.foreach(_.io.in.valid := false.B)
     io.imem.redirect_val := true.B
     io.imem.redirect_flush := true.B
     io.imem.redirect_pc := wb_uops(0).bits.pc + Mux(wb_uops(0).bits.rvc, 2.U, 4.U)
@@ -854,6 +912,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     flush_rrd .foreach(_ := true.B)
     for (i <- 1 until retireWidth) { flush_wb(i) := true.B }
     fpus.foreach(_.io.killw := true.B)
+    fpus.foreach(_.io.in.valid := false.B)
     io.imem.redirect_val := true.B
     io.imem.redirect_flush := true.B
     io.imem.redirect_pc := csr.io.evec
@@ -890,8 +949,17 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       flush_mem .foreach(_ := true.B)
       flush_ex.foreach(_ := true.B)
       flush_rrd .foreach(_ := true.B)
-      for (i <- i + 1 until retireWidth) { flush_wb(i) := true.B }
+      for (i <- i + 1 until retireWidth) {
+        flush_wb(i) := true.B
+        when (wb_uops(i).valid && wb_uops(i).bits.ctrl.wxd) {
+          isboard_wb_set(wb_uops(i).bits.rd) := true.B
+        }
+        when (wb_uops(i).valid && wb_uops(i).bits.ctrl.wfd) {
+          fsboard_wb_set(wb_uops(i).bits.rd) := true.B
+        }
+      }
       fpus.foreach(_.io.killw := true.B)
+      fpus.foreach(_.io.in.valid := false.B)
       io.imem.redirect_val := true.B
       io.imem.redirect_flush := true.B
       io.imem.redirect_pc := wb_uops(i).bits.pc

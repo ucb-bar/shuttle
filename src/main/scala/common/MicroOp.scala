@@ -32,6 +32,7 @@ class ShuttleUOP(implicit p: Parameters) extends CoreBundle {
   val rs1_data = UInt(64.W)
   val rs2_data = UInt(64.W)
   val rs3_data = UInt(64.W)
+  val uses_memalu = Bool()
 
   val wdata = Valid(UInt(64.W))
 
@@ -69,5 +70,5 @@ class ShuttleUOP(implicit p: Parameters) extends CoreBundle {
   def cfi = ctrl.branch || ctrl.jal || ctrl.jalr
 
   def uses_brjmp = cfi || sfence
-  def uses_alu = ctrl.wxd && !ctrl.mem && !ctrl.div && !ctrl.mul && !csr_en && !ctrl.fp
+  def uses_alu = ctrl.wxd && !ctrl.mem && !ctrl.div && !ctrl.mul && !csr_en && !ctrl.fp && !ctrl.rocc
 }
