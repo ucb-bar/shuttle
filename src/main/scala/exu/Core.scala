@@ -266,7 +266,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   var rrd_found_sfence = false.B
   var rrd_found_mul = false.B
   var rrd_found_div = false.B
-//  var rrd_found_fp = false.B
+  var rrd_found_ifpu = false.B
   for (i <- 0 until retireWidth) {
     val uop = rrd_uops(i).bits
     val ctrl = uop.ctrl
@@ -281,7 +281,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       ((uop.uses_brjmp || uop.next_pc.valid) && rrd_found_brjmp) ||
       (ctrl.div && rrd_found_div) ||
       (ctrl.mul && rrd_found_mul) ||
-//      (rrd_uops(i).bits.uses_fp && rrd_found_fp) ||
+      (rrd_uops(i).bits.uses_ifpu && rrd_found_ifpu) ||
       rrd_fence_stall ||
       rrd_found_system_insn ||
       rrd_found_sfence
@@ -289,12 +289,12 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     rrd_older_stalled = rrd_older_stalled || rrd_stall(i) || (rrd_uops(i).valid && (
       uop.xcpt || uop.csr_en
     ))
-    rrd_found_brjmp = rrd_found_brjmp || (rrd_uops(i).valid && (uop.uses_brjmp || uop.next_pc.valid))
-    rrd_found_system_insn = rrd_found_system_insn || (rrd_uops(i).valid && uop.system_insn)
-    rrd_found_sfence = rrd_found_sfence || (rrd_uops(i).valid && uop.sfence)
-    rrd_found_div = rrd_found_div || (rrd_uops(i).valid && ctrl.div)
-    rrd_found_mul = rrd_found_mul || (rrd_uops(i).valid && ctrl.mul)
-//    rrd_found_fp = rrd_found_fp || (rrd_uops(i).valid && rrd_uops(i).bits.uses_fp)
+    rrd_found_brjmp = rrd_found_brjmp || (uop.uses_brjmp || uop.next_pc.valid)
+    rrd_found_system_insn = rrd_found_system_insn || uop.system_insn
+    rrd_found_sfence = rrd_found_sfence || uop.sfence
+    rrd_found_div = rrd_found_div || ctrl.div
+    rrd_found_mul = rrd_found_mul || ctrl.mul
+    rrd_found_ifpu = rrd_found_ifpu || rrd_uops(i).bits.uses_ifpu
   }
 
   for (i <- 0 until retireWidth) {
@@ -327,12 +327,11 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     fsboard.foreach(_ := true.B)
   }
 
-//  val ex_fp_oh = ex_uops_reg.map({u => u.valid && u.bits.uses_fp})
-//  val ex_fp_val = ex_fp_oh.reduce(_||_)
+  val ex_ifpu_oh = ex_uops_reg.map({u => u.valid && u.bits.uses_ifpu})
+  val ex_ifpu_uop = Mux1H(ex_ifpu_oh, ex_uops_reg)
+  val ex_ifpu_inst = ex_ifpu_uop.bits.inst
   val ex_fp_val = ex_uops_reg(0).valid && ex_uops_reg(0).bits.uses_fp
-//  val ex_fp_fire = ((ex_fp_oh zip ex_fire).map { case (h, f) => h && f }).reduce(_||_)
   val ex_fp_fire = ex_fp_val && ex_fire(0)
-//  val ex_fp_uop = Mux1H(ex_fp_oh, ex_uops_reg)
   val ex_fp_uop = ex_uops_reg(0)
   val ex_fp_inst = ex_fp_uop.bits.inst
   val ex_fp_rm = Mux(ex_fp_inst(14,12) === 7.U, io.fcsr_rm, ex_fp_inst(14,12))
@@ -412,17 +411,24 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   fpiu.io.in.valid := (ex_fp_ctrl.toint || ex_fp_ctrl.div || ex_fp_ctrl.sqrt || (ex_fp_ctrl.fastpipe && ex_fp_ctrl.wflags)) && ex_fp_fire
   fpiu.io.in.bits := fuInput(None, ex_fp_ctrl, ex_fp_rm, ex_fp_inst)
 
-  val ifpus = Seq.fill(retireWidth) { Module(new ShuttleIntToFP) }
-  for (i <- 0 until retireWidth) {
-    val fp_ctrl = ex_uops_reg(i).bits.fp_ctrl
-    val inst = ex_uops_reg(i).bits.inst
-    ifpus(i).io.in.valid := ex_fire(i) && ex_uops_reg(i).bits.uses_ifpu
-    ifpus(i).io.in.bits := fuInput(None, fp_ctrl, Mux(inst(14,12) === 7.U, io.fcsr_rm, inst(14,12)), inst)
-    ifpus(i).io.in.bits.in1 := ex_uops_reg(i).bits.rs1_data
-    ifpus(i).io.in_rd := ex_uops_reg(i).bits.rd
-    ifpus(i).io.in_lt := DontCare
-    ifpus(i).io.in_out_tag := fp_ctrl.typeTagOut
-  }
+  val ifpu = Module(new ShuttleIntToFP)
+  ifpu.io.in.valid := (ex_ifpu_oh zip ex_fire).map({case (l,r) => l && r}).reduce(_||_)
+  ifpu.io.in.bits := fuInput(None, ex_ifpu_uop.bits.fp_ctrl,
+    Mux(ex_ifpu_inst(14,12) === 7.U, io.fcsr_rm, ex_ifpu_inst(14,12)), ex_ifpu_inst)
+  ifpu.io.in.bits.in1 := ex_ifpu_uop.bits.rs1_data
+  ifpu.io.in_rd := ex_ifpu_uop.bits.rd
+  ifpu.io.in_lt := DontCare
+  ifpu.io.in_out_tag := ex_ifpu_uop.bits.fp_ctrl.typeTagOut
+  // for (i <- 0 until retireWidth) {
+  //   val fp_ctrl = ex_uops_reg(i).bits.fp_ctrl
+  //   val inst = ex_uops_reg(i).bits.inst
+  //   ifpus(i).io.in.valid := ex_fire(i) && ex_uops_reg(i).bits.uses_ifpu
+  //   ifpus(i).io.in.bits := fuInput(None, fp_ctrl, Mux(inst(14,12) === 7.U, io.fcsr_rm, inst(14,12)), inst)
+  //   ifpus(i).io.in.bits.in1 := ex_uops_reg(i).bits.rs1_data
+  //   ifpus(i).io.in_rd := ex_uops_reg(i).bits.rd
+  //   ifpus(i).io.in_lt := DontCare
+  //   ifpus(i).io.in_out_tag := fp_ctrl.typeTagOut
+  // }
 
   val fpmu = Module(new ShuttleFPToFP)
   fpmu.io.in.valid := ex_fp_fire && ex_fp_ctrl.fastpipe
@@ -432,7 +438,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   fpus.foreach(_.io.in_rd := ex_fp_uop.bits.rd)
   fpus.foreach(_.io.in_lt := fpiu.io.out.bits.lt)
   fpus.foreach(_.io.in_out_tag := ex_fp_ctrl.typeTagOut)
-  val ex_fp_stall = (ifpus ++ fpus).map(!_.io.ready).reduce(_||_)
+  val ex_fp_stall = (Seq(ifpu) ++ fpus).map(!_.io.ready).reduce(_||_)
 
   val mulDivParams = tileParams.core.asInstanceOf[ShuttleCoreParams].mulDiv.get
   require(mulDivParams.mulUnroll == 0)
@@ -559,10 +565,10 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   fpus.foreach(_.io.firem := mem_fp_fire)
   fpus.foreach(_.io.killm := mem_fp_flush)
   val mem_ifpu_oh = mem_uops_reg.map({u => u.valid && u.bits.uses_ifpu})
-  val mem_ifpu_fire = (mem_ifpu_oh zip mem_fire).map({case (h,f) => h && f })
-  val mem_ifpu_flush = (mem_ifpu_oh zip flush_mem).map({case (h,f) => h && f })
-  (ifpus.map(_.io.firem) zip mem_ifpu_fire).map({case (l,r) => l := r})
-  (ifpus.map(_.io.killm) zip mem_ifpu_flush).map({case (l,r) => l := r})
+  val mem_ifpu_fire = (mem_ifpu_oh zip mem_fire).map({case (h,f) => h && f }).reduce(_||_)
+  val mem_ifpu_flush = (mem_ifpu_oh zip flush_mem).map({case (h,f) => h && f }).reduce(_||_)
+  ifpu.io.firem := mem_ifpu_fire
+  ifpu.io.killm := mem_ifpu_flush
 
   val mem_brjmp_oh = mem_uops_reg.map({u => u.valid && (u.bits.uses_brjmp || u.bits.next_pc.valid)})
   val mem_brjmp_val = mem_brjmp_oh.reduce(_||_)
@@ -617,7 +623,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     val valids = MaskLower(VecInit(mem_brjmp_oh).asUInt)
     flush_rrd .foreach(_ := true.B)
     flush_ex.foreach(_ := true.B)
-    (ifpus ++ fpus).foreach(_.io.in.valid := false.B)
+    (Seq(ifpu) ++ fpus).foreach(_.io.in.valid := false.B)
     for (i <- 0 until retireWidth)
       when (!valids(i)) { flush_mem(i) := true.B }
     io.imem.redirect_val := true.B
@@ -731,9 +737,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   fpus.foreach(_.io.firew := wb_fp_fire)
   fpus.foreach(_.io.killw := false.B)
   val wb_ifpu_oh = wb_uops_reg.map({u => u.valid && u.bits.uses_ifpu})
-  val wb_ifpu_fire = (wb_ifpu_oh zip wb_fire).map({case (h,f) => h && f})
-  (ifpus.map(_.io.firew) zip wb_ifpu_fire).map({case (l,r) => l := r})
-  ifpus.foreach(_.io.killw := false.B)
+  val wb_ifpu_fire = (wb_ifpu_oh zip wb_fire).map({case (h,f) => h && f}).reduce(_||_)
+  ifpu.io.firew := wb_ifpu_fire
+  ifpu.io.killw := false.B
 
   val divSqrt_val = RegInit(false.B)
   val divSqrt_waddr = Reg(UInt(5.W))
@@ -927,8 +933,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     flush_ex.foreach(_ := true.B)
     flush_rrd .foreach(_ := true.B)
     for (i <- 1 until retireWidth) { flush_wb(i) := true.B }
-    (ifpus ++ fpus).foreach(_.io.killw := true.B)
-    (ifpus ++ fpus).foreach(_.io.in.valid := false.B)
+    (Seq(ifpu) ++ fpus).foreach(_.io.killw := true.B)
+    (Seq(ifpu) ++ fpus).foreach(_.io.in.valid := false.B)
     io.imem.redirect_val := true.B
     io.imem.redirect_flush := true.B
     io.imem.redirect_pc := wb_uops(0).bits.pc + Mux(wb_uops(0).bits.rvc, 2.U, 4.U)
@@ -940,8 +946,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     flush_ex.foreach(_ := true.B)
     flush_rrd .foreach(_ := true.B)
     for (i <- 1 until retireWidth) { flush_wb(i) := true.B }
-    (ifpus ++ fpus).foreach(_.io.killw := true.B)
-    (ifpus ++ fpus).foreach(_.io.in.valid := false.B)
+    (Seq(ifpu) ++ fpus).foreach(_.io.killw := true.B)
+    (Seq(ifpu) ++ fpus).foreach(_.io.in.valid := false.B)
     io.imem.redirect_val := true.B
     io.imem.redirect_flush := true.B
     io.imem.redirect_pc := csr.io.evec
@@ -987,8 +993,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
           fsboard_wb_set(wb_uops(i).bits.rd) := true.B
         }
       }
-      (ifpus ++ fpus).foreach(_.io.killw := true.B)
-      (ifpus ++ fpus).foreach(_.io.in.valid := false.B)
+      (Seq(ifpu) ++ fpus).foreach(_.io.killw := true.B)
+      (Seq(ifpu) ++ fpus).foreach(_.io.in.valid := false.B)
       io.imem.redirect_val := true.B
       io.imem.redirect_flush := true.B
       io.imem.redirect_pc := wb_uops(i).bits.pc
@@ -1026,35 +1032,27 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
 
   val ll_fp_wval = WireInit(fp_load_val)
   val ll_fp_wdata = WireInit(0.U(65.W))
-  val ll_fp_wtype = WireInit(fp_load_type)
   val ll_fp_waddr = WireInit(fp_load_addr)
-  ifpus.foreach(_.io.out.ready := false.B)
+  ifpu.io.out.ready := false.B
   when (fp_load_val) {
     ll_fp_wval := true.B
     ll_fp_wdata := recode(fp_load_data, fp_load_type)
-    ll_fp_wtype := fp_load_type
     ll_fp_waddr := fp_load_addr
   } .elsewhen (divSqrt_val && divSqrt_wdata.valid) {
     ll_fp_wval := true.B
     ll_fp_wdata := divSqrt_wdata.bits
-    ll_fp_wtype := divSqrt_typeTag
     ll_fp_waddr := divSqrt_waddr
     divSqrt_val := false.B
     csr.io.fcsr_flags.valid := true.B
     csr_fcsr_flags(1) := divSqrt_flags
   } .otherwise {
-    var found = false.B
-    for (ifpu <- ifpus) {
-      when (ifpu.io.out.valid && !found) {
-        ifpu.io.out.ready := true.B
-        ll_fp_wval := true.B
-        ll_fp_wdata := ifpu.io.out.bits.data
-        ll_fp_waddr := ifpu.io.out_rd
-        ll_fp_wtype := ifpu.io.out_tag
-        csr.io.fcsr_flags.valid := true.B
-        csr_fcsr_flags(3) := ifpu.io.out.bits.exc
-      }
-      found = found || ifpu.io.out.valid
+    when (ifpu.io.out.valid) {
+      ifpu.io.out.ready := true.B
+      ll_fp_wval := true.B
+      ll_fp_wdata := box(ifpu.io.out.bits.data, ifpu.io.out_tag)
+      ll_fp_waddr := ifpu.io.out_rd
+      csr.io.fcsr_flags.valid := true.B
+      csr_fcsr_flags(3) := ifpu.io.out.bits.exc
     }
   }
 
