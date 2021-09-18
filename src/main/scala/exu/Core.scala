@@ -23,7 +23,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     val rocc = Flipped(new RoCCCoreIO())
     val trace = Vec(coreParams.retireWidth, Output(new TracedInstruction))
     val fcsr_rm = Output(UInt(FPConstants.RM_SZ.W))
-  })
+  })z
 
   // EventSet can't handle empty
   val events = new EventSets(Seq(new EventSet((mask, hit) => false.B, Seq(("placeholder", () => false.B)))))
@@ -392,9 +392,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     req.fmaCmd := inst(3,2) | (!ctrl.ren3 && inst(27))
     req
   }
-  println(floatTypes)
-  println(minFLen)
-  println(fLen)
+
   val sfma = Module(new ShuttleFPUFMAPipe(fpParams.sfmaLatency, FType.S))
   sfma.io.in.valid := ex_fp_ctrl.fma && ex_fp_ctrl.typeTagOut === S && ex_fp_fire
   sfma.io.in.bits := fuInput(Some(sfma.t), ex_fp_ctrl, ex_fp_rm, ex_fp_inst)
