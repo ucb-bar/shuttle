@@ -10,13 +10,17 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.util.property._
 import freechips.rocketchip.tile._
 
-class ShuttleFPUFMAPipe(latency: Int, val t: FType)(implicit p: Parameters)
+class ShuttleFPUFMAPipe(latency: Int)(implicit p: Parameters)
     extends ShuttleFPUPipe(latency)(p) {
 
-  val fpu = Module(new FPUFMAPipe(latency, t))
-  fpu.io.in := io.in
-  when (fpu.io.out.valid) {
-    trackers(out_idx).bits.result := fpu.io.out
+  val dfma = Module(new FPUFMAPipe(latency, FType.D))
+  val sfma = Module(new FPUFMAPipe(latency, FType.S))
+  val hfma = Module(new FPUFMAPipe(latency, FType.H))
+  val fmas = Seq(dfma, sfma, hfma)
+  fmas.foreach(_.io.in := io.in)
+  fmas zip Seq(D, S, H) map { case (f,t) => f.io.in.valid := io.in.valid && io.in.bits.typeTagOut === t }
+  when (fmas.map(_.io.out.valid).reduce(_||_)) {
+    trackers(out_idx).bits.result := Mux1H(fmas.map(_.io.out.valid), fmas.map(_.io.out))
   }
 }
 

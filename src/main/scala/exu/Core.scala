@@ -147,7 +147,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   }
 
   for (i <- 0 until retireWidth) {
-    io.imem.resp(i).ready := !rrd_stall(i)//rrd_fire(i)
+    io.imem.resp(i).ready := !rrd_stall(i)
   }
   val iregfile = Reg(Vec(32, UInt(64.W)))
   val isboard = Reg(Vec(32, Bool()))
@@ -166,9 +166,6 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   }
 
   def bypass(bypasses: Seq[Bypass], rs: UInt): (Bool, UInt) = {
-    // val bypass_hits = bypasses.map(b => b.valid && b.dst === rs && b.dst =/= 0.U)
-    // assert(PopCount(bypass_hits) <= 1.U)
-    // (bypass_hits.reduce(_||_), Mux1H(bypass_hits, bypasses.map(_.data)))
     val bypass_hit = WireInit(false.B)
     val bypass_data = WireInit(0.U(64.W))
     for (b <- bypasses) {
@@ -396,17 +393,11 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     req
   }
 
-  val sfma = Module(new ShuttleFPUFMAPipe(fpParams.sfmaLatency, FType.S))
-  sfma.io.in.valid := ex_fp_ctrl.fma && ex_fp_ctrl.typeTagOut === S && ex_fp_fire
-  sfma.io.in.bits := fuInput(Some(sfma.t), ex_fp_ctrl, ex_fp_rm, ex_fp_inst)
-
-  val dfma = Module(new ShuttleFPUFMAPipe(fpParams.dfmaLatency, FType.D))
-  dfma.io.in.valid := ex_fp_ctrl.fma && ex_fp_ctrl.typeTagOut === D && ex_fp_fire
-  dfma.io.in.bits := fuInput(Some(dfma.t), ex_fp_ctrl, ex_fp_rm, ex_fp_inst)
-
-  val hfma = Module(new ShuttleFPUFMAPipe(fpParams.sfmaLatency, FType.H))
-  hfma.io.in.valid := ex_fp_ctrl.fma && ex_fp_ctrl.typeTagOut === H && ex_fp_fire
-  hfma.io.in.bits := fuInput(Some(hfma.t), ex_fp_ctrl, ex_fp_rm, ex_fp_inst)
+  val fmas = Module(new ShuttleFPUFMAPipe(fpParams.dfmaLatency))
+  fmas.io.in.valid := ex_fp_ctrl.fma && ex_fp_fire
+  fmas.io.in.bits := Mux(ex_fp_ctrl.typeTagOut === D, fuInput(Some(FType.D), ex_fp_ctrl, ex_fp_rm, ex_fp_inst),
+    Mux(ex_fp_ctrl.typeTagOut === S, fuInput(Some(FType.S), ex_fp_ctrl, ex_fp_rm, ex_fp_inst),
+      fuInput(Some(FType.H), ex_fp_ctrl, ex_fp_rm, ex_fp_inst)))
 
   val fpiu = Module(new FPToInt)
   fpiu.io.in.valid := (ex_fp_ctrl.toint || ex_fp_ctrl.div || ex_fp_ctrl.sqrt || (ex_fp_ctrl.fastpipe && ex_fp_ctrl.wflags)) && ex_fp_fire
@@ -420,22 +411,12 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   ifpu.io.in_rd := ex_ifpu_uop.bits.rd
   ifpu.io.in_lt := DontCare
   ifpu.io.in_out_tag := ex_ifpu_uop.bits.fp_ctrl.typeTagOut
-  // for (i <- 0 until retireWidth) {
-  //   val fp_ctrl = ex_uops_reg(i).bits.fp_ctrl
-  //   val inst = ex_uops_reg(i).bits.inst
-  //   ifpus(i).io.in.valid := ex_fire(i) && ex_uops_reg(i).bits.uses_ifpu
-  //   ifpus(i).io.in.bits := fuInput(None, fp_ctrl, Mux(inst(14,12) === 7.U, io.fcsr_rm, inst(14,12)), inst)
-  //   ifpus(i).io.in.bits.in1 := ex_uops_reg(i).bits.rs1_data
-  //   ifpus(i).io.in_rd := ex_uops_reg(i).bits.rd
-  //   ifpus(i).io.in_lt := DontCare
-  //   ifpus(i).io.in_out_tag := fp_ctrl.typeTagOut
-  // }
 
   val fpmu = Module(new ShuttleFPToFP)
   fpmu.io.in.valid := ex_fp_fire && ex_fp_ctrl.fastpipe
   fpmu.io.in.bits := fpiu.io.in.bits
 
-  val fpus = Seq(sfma, dfma, hfma, fpmu)
+  val fpus = Seq(fmas, fpmu)
   fpus.foreach(_.io.in_rd := ex_fp_uop.bits.rd)
   fpus.foreach(_.io.in_lt := fpiu.io.out.bits.lt)
   fpus.foreach(_.io.in_out_tag := ex_fp_ctrl.typeTagOut)
@@ -731,13 +712,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   }
 
   //wb
-  //val wb_fp_oh = wb_uops_reg.map({u => u.valid && u.bits.uses_fp})
   val wb_fp_fire = wb_uops_reg(0).valid && wb_uops_reg(0).bits.uses_fp && wb_fire(0)
-  //val wb_fp_fire = (wb_fp_oh zip wb_fire).map({ case (h, f) => h && f}).reduce(_||_)
-  //val wb_fp_uop = Mux1H(wb_fp_oh, wb_uops_reg)
   val wb_fp_uop = wb_uops_reg(0)
   val wb_fp_ctrl = wb_fp_uop.bits.fp_ctrl
-//  val wb_fp_divsqrt = wb_fp_oh.reduce(_||_) && (wb_fp_ctrl.div || wb_fp_ctrl.sqrt)
   val wb_fp_divsqrt = wb_uops_reg(0).valid && wb_fp_uop.bits.uses_fp && (wb_fp_ctrl.div || wb_fp_ctrl.sqrt)
   fpus.foreach(_.io.firew := wb_fp_fire)
   fpus.foreach(_.io.killw := false.B)
@@ -1114,6 +1091,4 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       wb_uops_reg(i).valid := false.B
     }
   }
-  dontTouch(wb_uops)
-  dontTouch(io)
 }
