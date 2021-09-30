@@ -265,12 +265,13 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   var rrd_found_div = false.B
   var rrd_found_ifpu = false.B
   var rrd_found_mem = false.B
+  var rrd_found_rocc = false.B
   for (i <- 0 until retireWidth) {
     val uop = rrd_uops(i).bits
     val ctrl = uop.ctrl
 
     val rrd_fence_stall = ((uop.system_insn || ctrl.fence || ctrl.amo || ctrl.fence_i) &&
-      (ex_bsy || mem_bsy || wb_bsy || isboard_bsy || fsboard_bsy || !io.dmem.ordered))
+      (ex_bsy || mem_bsy || wb_bsy || isboard_bsy || fsboard_bsy || !io.dmem.ordered || io.rocc.busy))
     val is_pipe0 = uop.csr_en || uop.sfence || uop.system_insn || ctrl.fence || ctrl.csr =/= CSR.N || uop.xcpt || uop.uses_fp
 
     rrd_stall(i) := rrd_uops(i).valid && (
@@ -281,6 +282,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       (ctrl.mul && rrd_found_mul) ||
       (uop.uses_ifpu && rrd_found_ifpu) ||
       (ctrl.mem && rrd_found_mem) ||
+      (ctrl.rocc && rrd_found_rocc) ||
+      (ctrl.rocc && !io.rocc.cmd.ready) ||
       rrd_fence_stall ||
       rrd_found_system_insn ||
       rrd_found_sfence
@@ -295,6 +298,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     rrd_found_mul = rrd_found_mul || ctrl.mul
     rrd_found_ifpu = rrd_found_ifpu || uop.uses_ifpu
     rrd_found_mem = rrd_found_mem || ctrl.mem
+    rrd_found_rocc = rrd_found_rocc || ctrl.rocc
   }
 
   for (i <- 0 until retireWidth) {
@@ -752,7 +756,20 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       divSqrt_flags := divSqrt.io.exceptionFlags
       divSqrt_typeTag := typeTag(t).U
     }
+  }
 
+  val wb_rocc_oh = wb_uops_reg.map({u => u.valid && u.bits.ctrl.rocc})
+  val wb_rocc_fire = (wb_rocc_oh zip wb_fire).map({case (h,f) => h && f}).reduce(_||_)
+  val wb_rocc_uop = Mux1H(wb_rocc_oh, wb_uops_reg)
+  io.rocc.cmd.valid := false.B
+  io.rocc.cmd.bits := DontCare
+  if (usingRoCC) {
+    io.rocc.cmd.valid := wb_rocc_fire
+    io.rocc.cmd.bits.status := csr.io.status
+    io.rocc.cmd.bits.inst := wb_rocc_uop.bits.inst.asTypeOf(new RoCCInstruction)
+    io.rocc.cmd.bits.rs1 := wb_rocc_uop.bits.rs1
+    io.rocc.cmd.bits.rs2 := wb_rocc_uop.bits.rs2
+    assert(!(io.rocc.cmd.valid && !io.rocc.cmd.ready))
   }
 
   val wb_xcpt_oh = (wb_uops zip wb_fire) map { case (u, f) => u.bits.xcpt && f && !u.bits.needs_replay}
@@ -819,6 +836,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   wb_uops(0).bits.xcpt_cause := cause
   for (i <- 0 until retireWidth) {
     when (wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.mem && io.dmem.s2_nack) {
+      wb_uops(i).bits.needs_replay := true.B
+    }
+    when (wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.rocc && !io.rocc.cmd.ready) {
       wb_uops(i).bits.needs_replay := true.B
     }
   }
@@ -1008,15 +1028,31 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   val dmem_waddr = io.dmem.resp.bits.tag(5,1)
   val dmem_wdata = io.dmem.resp.bits.data
 
-  ll_bypass(0).valid := io.dmem.resp.valid && io.dmem.resp.bits.has_data && dmem_xpu
-  ll_bypass(0).dst := dmem_waddr
-  ll_bypass(0).data := dmem_wdata
-  ll_bypass(0).can_bypass := true.B
-  when (io.dmem.resp.valid && io.dmem.resp.bits.has_data && dmem_xpu) {
-    iregfile(dmem_waddr) := dmem_wdata
-    isboard_wb_set(dmem_waddr) := true.B
-    printf("x%d p%d 0x%x\n", dmem_waddr, dmem_waddr, dmem_wdata)
+  val ll_wen = WireInit(io.dmem.resp.valid && io.dmem.resp.bits.has_data && dmem_xpu)
+  val ll_waddr = WireInit(dmem_waddr)
+  val ll_wdata = WireInit(dmem_wdata)
+
+  if (usingRoCC) {
+    io.rocc.resp.ready := !io.dmem.resp.valid
+    when (io.rocc.resp.fire()) {
+      ll_wen := true.B
+      ll_waddr := io.rocc.resp.bits.rd
+      ll_wdata := io.rocc.resp.bits.data
+    }
   }
+
+  ll_bypass(0).valid := ll_wen
+  ll_bypass(0).dst := ll_waddr
+  ll_bypass(0).data := ll_wdata
+  ll_bypass(0).can_bypass := true.B
+
+  when (ll_wen) {
+    iregfile(ll_waddr) := ll_wdata
+    isboard_wb_set(ll_waddr) := true.B
+    printf("x%d p%d 0x%x\n", ll_waddr, ll_waddr, ll_wdata)
+  }
+
+
   val fp_load_val = RegNext(io.dmem.resp.valid && io.dmem.resp.bits.has_data && dmem_fpu)
   val fp_load_type = RegNext(io.dmem.resp.bits.size - typeTagWbOffset)
   val fp_load_addr = RegNext(io.dmem.resp.bits.tag(5,1))
