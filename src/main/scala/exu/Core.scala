@@ -75,21 +75,22 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   mem_stall.foreach(_ := false.B)
   wb_stall.foreach(_ := false.B)
 
-  val rrd_fire = (rrd_uops zip rrd_stall) map { case (u, s) => u.valid && !s }
-  val ex_fire = (ex_uops_reg zip ex_stall) map { case (u, s) => u.valid && !s }
-  val mem_fire = (mem_uops_reg zip mem_stall) map { case (u, s) => u.valid && !s }
-  val wb_fire = (wb_uops_reg zip wb_stall) map { case (u, s) => u.valid && !s }
-
-  val ex_bsy = ex_uops_reg.map(_.valid).reduce(_||_)
-  val mem_bsy = mem_uops_reg.map(_.valid).reduce(_||_)
-  val wb_bsy = wb_uops_reg.map(_.valid).reduce(_||_)
-
   val flush_rrd = WireInit(VecInit(Seq.fill(retireWidth) { false.B }))
   assert(PopCount(flush_rrd).isOneOf(0.U, retireWidth.U))
   val flush_ex = WireInit(VecInit(Seq.fill(retireWidth) { false.B }))
   assert(PopCount(flush_ex).isOneOf(0.U, retireWidth.U))
   val flush_mem = WireInit(VecInit(Seq.fill(retireWidth) { false.B }))
   val flush_wb = WireInit(VecInit(Seq.fill(retireWidth) { false.B }))
+
+  val rrd_fire = (rrd_uops zip rrd_stall) map { case (u, s) => u.valid && !s }
+  val ex_fire = (ex_uops_reg zip ex_stall) map { case (u, s) => u.valid && !s }
+  val mem_fire = (mem_uops_reg zip mem_stall) map { case (u, s) => u.valid && !s }
+  val wb_fire = ((wb_uops_reg zip wb_stall) zip flush_wb) map { case ((u, s), f) => u.valid && !s && !f}
+
+  val ex_bsy = ex_uops_reg.map(_.valid).reduce(_||_)
+  val mem_bsy = mem_uops_reg.map(_.valid).reduce(_||_)
+  val wb_bsy = wb_uops_reg.map(_.valid).reduce(_||_)
+
 
   io.imem.redirect_val := false.B
   io.imem.redirect_flush := false.B
@@ -966,61 +967,85 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
 
 
   var wb_older_stalled = false.B
-  var wb_found_replay = false.B
-  var wb_found_xcpt = false.B
   for (i <- 0 until retireWidth) {
     wb_stall(i) := wb_uops_reg(i).valid && (
-      wb_found_replay ||
-      wb_found_xcpt ||
       wb_fp_divsqrt_stall ||
       (wb_muldiv_stall && (i == retireWidth-1).B)
     ) || wb_older_stalled
     wb_older_stalled = wb_older_stalled || wb_stall(i)
-    wb_found_replay = wb_found_replay || (wb_uops_reg(i).valid && wb_uops(i).bits.needs_replay)
-    wb_found_xcpt = wb_found_xcpt || (wb_uops_reg(i).valid && wb_uops(i).bits.xcpt)
   }
 
-
-  var replay_found = false.B
+  val replays = wb_uops.map({u => u.valid && u.bits.needs_replay})
+  when (replays.reduce(_||_)) {
+    flush_mem .foreach(_ := true.B)
+    flush_ex.foreach(_ := true.B)
+    flush_rrd .foreach(_ := true.B)
+    (Seq(ifpu) ++ fpus).foreach(_.io.in.valid := false.B)
+  }
   for (i <- 0 until retireWidth) {
-    if (i <= 1) {
-      val replay = wb_uops_reg(i).valid && wb_uops(i).bits.needs_replay
-      assert(!(replay_found && replay))
-      replay_found = replay_found || replay
-      when (replay) {
-        flush_mem .foreach(_ := true.B)
-        flush_ex.foreach(_ := true.B)
-        flush_rrd .foreach(_ := true.B)
-        for (i <- i + 1 until retireWidth) {
-          flush_wb(i) := true.B
-          when (wb_uops(i).valid && wb_uops(i).bits.ctrl.wxd) {
-            isboard_wb_set(wb_uops(i).bits.rd) := true.B
-          }
-          when (wb_uops(i).valid && wb_uops(i).bits.ctrl.wfd) {
-            fsboard_wb_set(wb_uops(i).bits.rd) := true.B
-          }
-        }
-        if (i == 0) {
-          (Seq(ifpu) ++ fpus).foreach(_.io.killw := true.B)
-          (Seq(ifpu) ++ fpus).foreach(_.io.in.valid := false.B)
-        }
-        io.imem.redirect_val := true.B
-        io.imem.redirect_flush := true.B
-        io.imem.redirect_pc := wb_uops(i).bits.pc
-        io.imem.redirect_ras_head := wb_uops(i).bits.ras_head
+    val killed_by_older_replay = replays.take(i).orR
+    when (killed_by_older_replay) {
+      flush_wb(i) := true.B
+    }
+    when (killed_by_older_replay ||
+      (wb_fire(i) && (wb_uops(i).bits.xcpt || wb_uops(i).bits.needs_replay))) {
+      when (wb_uops(i).valid && (wb_uops(i).bits.uses_ifpu || wb_uops(i).bits.uses_fp)) {
+        (Seq(ifpu) ++ fpus).foreach(_.io.killw := true.B)
       }
-      when (wb_fire(i) && (wb_uops(i).bits.xcpt || wb_uops(i).bits.needs_replay)) {
-        when (wb_uops(i).bits.ctrl.wxd) {
-          isboard_wb_set(wb_uops(i).bits.rd) := true.B
-        }
-        when (wb_uops(i).bits.ctrl.wfd) {
-          fsboard_wb_set(wb_uops(i).bits.rd) := true.B
-        }
+      when (wb_uops(i).valid && wb_uops(i).bits.ctrl.wxd) {
+        isboard_wb_set(wb_uops(i).bits.rd) := true.B
       }
-    } else {
-      assert(!(wb_uops_reg(i).valid && wb_uops(i).bits.needs_replay))
+      when (wb_uops(i).valid && wb_uops(i).bits.ctrl.wfd) {
+        fsboard_wb_set(wb_uops(i).bits.rd) := true.B
+      }
     }
   }
+  for (i <- (0 until retireWidth).reverse) {
+    when (replays(i)) {
+      io.imem.redirect_val := true.B
+      io.imem.redirect_flush := true.B
+      io.imem.redirect_pc := wb_uops(i).bits.pc
+      io.imem.redirect_ras_head := wb_uops(i).bits.ras_head
+    }
+  }
+  // for (i <- (0 until retireWidth).reverse) {
+  //   if (i <= 1) {
+  //     val replay = wb_uops_reg(i).valid && wb_uops(i).bits.needs_replay
+  //     when (replay) {
+  //       flush_mem .foreach(_ := true.B)
+  //       flush_ex.foreach(_ := true.B)
+  //       flush_rrd .foreach(_ := true.B)
+  //       for (i <- i + 1 until retireWidth) {
+  //         flush_wb(i) := true.B
+  //         when (wb_uops(i).valid && wb_uops(i).bits.ctrl.wxd) {
+  //           isboard_wb_set(wb_uops(i).bits.rd) := true.B
+  //         }
+  //         when (wb_uops(i).valid && wb_uops(i).bits.ctrl.wfd) {
+  //           fsboard_wb_set(wb_uops(i).bits.rd) := true.B
+  //         }
+  //       }
+  //       if (i == 0) {
+  //         (Seq(ifpu) ++ fpus).foreach(_.io.killw := true.B)
+  //       }
+  //       (Seq(ifpu) ++ fpus).foreach(_.io.in.valid := false.B)
+
+  //       io.imem.redirect_val := true.B
+  //       io.imem.redirect_flush := true.B
+  //       io.imem.redirect_pc := wb_uops(i).bits.pc
+  //       io.imem.redirect_ras_head := wb_uops(i).bits.ras_head
+  //     }
+  //     when (wb_fire(i) && (wb_uops(i).bits.xcpt || wb_uops(i).bits.needs_replay)) {
+  //       when (wb_uops(i).bits.ctrl.wxd) {
+  //         isboard_wb_set(wb_uops(i).bits.rd) := true.B
+  //       }
+  //       when (wb_uops(i).bits.ctrl.wfd) {
+  //         fsboard_wb_set(wb_uops(i).bits.rd) := true.B
+  //       }
+  //     }
+  //   } else {
+  //     assert(!(wb_uops_reg(i).valid && wb_uops(i).bits.needs_replay))
+  //   }
+  // }
 
   // ll wb
   val dmem_xpu = !io.dmem.resp.bits.tag(0)
