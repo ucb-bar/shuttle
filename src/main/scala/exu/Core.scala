@@ -256,8 +256,6 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   val fsboard_bsy = Wire(Bool())
   var rrd_older_stalled = false.B
   var rrd_found_brjmp = false.B
-  var rrd_found_system_insn = false.B
-  var rrd_found_sfence = false.B
   var rrd_found_ifpu = false.B
   var rrd_found_mem = false.B
   var rrd_found_rocc = false.B
@@ -277,16 +275,12 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       (ctrl.mem && rrd_found_mem) ||
       (ctrl.rocc && rrd_found_rocc) ||
       (ctrl.rocc && !io.rocc.cmd.ready) ||
-      rrd_fence_stall ||
-      rrd_found_system_insn ||
-      rrd_found_sfence
+      rrd_fence_stall
     ) || rrd_older_stalled || csr.io.csr_stall || ex_stall.reduce(_||_)
     rrd_older_stalled = rrd_older_stalled || rrd_stall(i) || (rrd_uops(i).valid && (
       uop.xcpt || uop.csr_en
     ))
     rrd_found_brjmp = rrd_found_brjmp || (uop.uses_brjmp || uop.next_pc.valid)
-    rrd_found_system_insn = rrd_found_system_insn || uop.system_insn
-    rrd_found_sfence = rrd_found_sfence || uop.sfence
     rrd_found_ifpu = rrd_found_ifpu || uop.uses_ifpu
     rrd_found_mem = rrd_found_mem || ctrl.mem
     rrd_found_rocc = rrd_found_rocc || ctrl.rocc
