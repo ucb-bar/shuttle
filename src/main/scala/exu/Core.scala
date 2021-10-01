@@ -744,11 +744,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     assert(!(io.rocc.cmd.valid && !io.rocc.cmd.ready))
   }
 
-  val wb_xcpt_oh = (wb_uops zip wb_fire) map { case (u, f) => u.bits.xcpt && f && !u.bits.needs_replay}
-  val wb_xcpt_uop = Mux1H(wb_xcpt_oh, wb_uops)
-  val wb_xcpt_uop_reg = Mux1H(wb_xcpt_oh, wb_uops_reg)
-  assert(PopCount(wb_xcpt_oh) <= 1.U)
-  csr.io.exception := wb_xcpt_oh.reduce(_||_)
+  val wb_xcpt_uop = wb_uops(0)
+  val wb_xcpt_uop_reg = wb_uops_reg(0)
+  csr.io.exception := wb_uops(0).bits.xcpt && !wb_uops(0).bits.needs_replay && wb_fire(0)
   csr.io.cause := wb_xcpt_uop.bits.xcpt_cause
   csr.io.retire := PopCount(wb_fire zip wb_uops map { case (f, u) => f && !u.bits.xcpt && !u.bits.needs_replay })
   csr.io.pc := wb_uops_reg(0).bits.pc
