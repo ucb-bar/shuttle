@@ -745,8 +745,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     io.rocc.cmd.valid := wb_rocc_fire
     io.rocc.cmd.bits.status := csr.io.status
     io.rocc.cmd.bits.inst := wb_rocc_uop.bits.inst.asTypeOf(new RoCCInstruction)
-    io.rocc.cmd.bits.rs1 := wb_rocc_uop.bits.rs1
-    io.rocc.cmd.bits.rs2 := wb_rocc_uop.bits.rs2
+    io.rocc.cmd.bits.rs1 := wb_rocc_uop.bits.rs1_data
+    io.rocc.cmd.bits.rs2 := wb_rocc_uop.bits.rs2_data
     assert(!(io.rocc.cmd.valid && !io.rocc.cmd.ready))
   }
 
@@ -891,7 +891,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     io.imem.sfence.bits.rs1 := wb_uops(0).bits.mem_size(0)
     io.imem.sfence.bits.rs2 := wb_uops(0).bits.mem_size(1)
     io.imem.sfence.bits.addr := wb_uops(0).bits.wdata.bits
-    io.imem.sfence.bits.asid := wb_uops(0).bits.rs2
+    io.imem.sfence.bits.asid := wb_uops(0).bits.rs2_data
   }
 
   when (wb_uops_reg(0).valid && ((wb_uops(0).bits.csr_wen && !wb_uops(0).bits.needs_replay) ||

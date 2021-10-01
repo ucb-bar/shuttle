@@ -71,7 +71,9 @@ class ShuttleTile private(
   val intOutwardNode = IntIdentityNode()
   val masterNode = visibilityNode
   val slaveNode = TLIdentityNode()
-  masterNode := tlMasterXbar.node
+
+  tlOtherMastersNode := TLBuffer() := tlMasterXbar.node
+  masterNode :=* tlOtherMastersNode
 
 
   val cpuDevice: SimpleDevice = new SimpleDevice("cpu", Seq("ucb-bar,shuttle", "riscv")) {
