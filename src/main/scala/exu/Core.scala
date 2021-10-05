@@ -259,6 +259,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   var rrd_found_ifpu = false.B
   var rrd_found_mem = false.B
   var rrd_found_rocc = false.B
+  var rrd_found_xcpt = false.B
+  var rrd_found_csr = false.B
   for (i <- 0 until retireWidth) {
     val uop = rrd_uops(i).bits
     val ctrl = uop.ctrl
@@ -275,15 +277,17 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       (ctrl.mem && rrd_found_mem) ||
       (ctrl.rocc && rrd_found_rocc) ||
       (ctrl.rocc && !io.rocc.cmd.ready) ||
-      rrd_fence_stall
+      rrd_fence_stall ||
+      rrd_found_csr ||
+      rrd_found_xcpt
     ) || rrd_older_stalled || csr.io.csr_stall || ex_stall.reduce(_||_)
-    rrd_older_stalled = rrd_older_stalled || rrd_stall(i) || (rrd_uops(i).valid && (
-      uop.xcpt || uop.csr_en
-    ))
+    rrd_older_stalled = rrd_older_stalled || rrd_stall(i)
     rrd_found_brjmp = rrd_found_brjmp || (uop.uses_brjmp || uop.next_pc.valid)
     rrd_found_ifpu = rrd_found_ifpu || uop.uses_ifpu
     rrd_found_mem = rrd_found_mem || ctrl.mem
     rrd_found_rocc = rrd_found_rocc || ctrl.rocc
+    rrd_found_xcpt = rrd_found_xcpt || uop.xcpt
+    rrd_found_csr = rrd_found_csr || uop.csr_en
   }
 
   for (i <- 0 until retireWidth) {
