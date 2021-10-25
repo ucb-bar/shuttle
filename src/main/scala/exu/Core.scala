@@ -387,17 +387,18 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   }
 
   val fmas = Module(new ShuttleFPUFMAPipe(fpParams.dfmaLatency))
-  fmas.io.in.valid := ex_fp_ctrl.fma && ex_fp_fire
+  fmas.io.in.valid := ex_fp_ctrl.fma && ex_fp_fire && !ex_fp_uop.bits.xcpt
   fmas.io.in.bits := Mux(ex_fp_ctrl.typeTagOut === D, fuInput(Some(FType.D), ex_fp_ctrl, ex_fp_rm, ex_fp_inst),
     Mux(ex_fp_ctrl.typeTagOut === S, fuInput(Some(FType.S), ex_fp_ctrl, ex_fp_rm, ex_fp_inst),
       fuInput(Some(FType.H), ex_fp_ctrl, ex_fp_rm, ex_fp_inst)))
 
   val fpiu = Module(new FPToInt)
-  fpiu.io.in.valid := (ex_fp_ctrl.toint || ex_fp_ctrl.div || ex_fp_ctrl.sqrt || (ex_fp_ctrl.fastpipe && ex_fp_ctrl.wflags)) && ex_fp_fire
+  fpiu.io.in.valid := ((ex_fp_ctrl.toint || ex_fp_ctrl.div || ex_fp_ctrl.sqrt || (ex_fp_ctrl.fastpipe && ex_fp_ctrl.wflags)) &&
+    ex_fp_fire && !ex_fp_uop.bits.xcpt)
   fpiu.io.in.bits := fuInput(None, ex_fp_ctrl, ex_fp_rm, ex_fp_inst)
 
   val ifpu = Module(new ShuttleIntToFP)
-  ifpu.io.in.valid := (ex_ifpu_oh zip ex_fire).map({case (l,r) => l && r}).reduce(_||_)
+  ifpu.io.in.valid := (ex_ifpu_oh zip ex_fire).map({case (l,r) => l && r}).reduce(_||_) && !ex_ifpu_uop.bits.xcpt
   ifpu.io.in.bits := fuInput(None, ex_ifpu_uop.bits.fp_ctrl,
     Mux(ex_ifpu_inst(14,12) === 7.U, io.fcsr_rm, ex_ifpu_inst(14,12)), ex_ifpu_inst)
   ifpu.io.in.bits.in1 := ex_ifpu_uop.bits.rs1_data
@@ -406,7 +407,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   ifpu.io.in_out_tag := ex_ifpu_uop.bits.fp_ctrl.typeTagOut
 
   val fpmu = Module(new ShuttleFPToFP)
-  fpmu.io.in.valid := ex_fp_fire && ex_fp_ctrl.fastpipe
+  fpmu.io.in.valid := ex_fp_fire && ex_fp_ctrl.fastpipe && !ex_fp_uop.bits.xcpt
   fpmu.io.in.bits := fpiu.io.in.bits
 
   val fpus = Seq(fmas, fpmu)
@@ -791,7 +792,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     io.imem.flush_icache := true.B
   }
 
+
   csr.io.fcsr_flags.valid := false.B
+  csr.io.set_fs_dirty.map(_ := false.B)
   val csr_fcsr_flags = Wire(Vec(4, UInt(FPConstants.FLAGS_SZ.W)))
   csr_fcsr_flags.foreach(_ := 0.U)
   csr.io.fcsr_flags.bits := csr_fcsr_flags.reduce(_|_)
@@ -873,7 +876,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     }
   }
 
-  when (wb_fp_fire && wb_fp_uop.bits.fp_ctrl.toint) {
+  when (wb_fp_fire && wb_fp_uop.bits.fp_ctrl.toint && !wb_fp_uop.bits.xcpt) {
     csr.io.fcsr_flags.valid := true.B
     csr_fcsr_flags(0) := wb_fp_uop.bits.fexc
   }
@@ -1029,6 +1032,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   when (ll_fp_wval) {
     printf("f%d p%d 0x%x\n", ll_fp_waddr, ll_fp_waddr + 32.U, ieee(ll_fp_wdata))
     fregfile(ll_fp_waddr) := ll_fp_wdata
+    csr.io.set_fs_dirty.map(_ := true.B)
     fsboard_wb_set(ll_fp_waddr) := true.B
   }
 
@@ -1058,6 +1062,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     fregfile(ll_fma_waddr) := wdata
     fsboard_wb_set(ll_fma_waddr) := true.B
     csr.io.fcsr_flags.valid := true.B
+    csr.io.set_fs_dirty.map(_ := true.B)
     csr_fcsr_flags(2) := ll_fma_wexc
   }
 
