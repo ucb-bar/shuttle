@@ -176,7 +176,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
 
   val rrd_stall_data = Wire(Vec(retireWidth, Bool()))
   val rrd_irf_writes = Wire(Vec(retireWidth, Valid(UInt(5.W))))
-  val rrd_mem_p0_can_forward = rrd_uops(0).bits.ctrl.wxd && rrd_uops(0).bits.uses_alu
+  val enableMemALU = coreParams.asInstanceOf[ShuttleCoreParams].enableMemALU
+  val rrd_mem_p0_can_forward = rrd_uops(0).bits.ctrl.wxd && rrd_uops(0).bits.uses_alu && enableMemALU.B
   for (i <- 0 until retireWidth) {
     val fp_ctrl = rrd_uops(i).bits.fp_ctrl
     val ctrl = rrd_uops(i).bits.ctrl
@@ -227,8 +228,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     val rd_data_hazard  = (rd_older_hazard || rd_same_hazard) && ctrl.wxd && rd =/= 0.U
 
     rrd_stall_data(i) := (rs1_data_hazard || rs2_data_hazard || rd_data_hazard)
-
-    rrd_uops(i).bits.uses_memalu := rrd_uops(i).bits.uses_alu && ((rs1_w0_hit && rs1_can_forward_from_mem_p0) || (rs2_w0_hit && rs2_can_forward_from_mem_p0))
+    rrd_uops(i).bits.uses_memalu := rrd_uops(i).bits.uses_alu && ((rs1_w0_hit && rs1_can_forward_from_mem_p0) || (rs2_w0_hit && rs2_can_forward_from_mem_p0)) && enableMemALU.B
 
     rrd_irf_writes(i).valid := rrd_uops(i).valid && rrd_uops(i).bits.ctrl.wxd
     rrd_irf_writes(i).bits := rrd_uops(i).bits.rd
@@ -613,39 +613,41 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     mem_bypasses(i).data := mem_uops_reg(i).bits.wdata.bits
   }
 
-  for (i <- 1 until retireWidth) {
-    val alu = Module(new ALU)
-    val uop = mem_uops_reg(i).bits
-    val ctrl = mem_uops_reg(i).bits.ctrl
-    val imm = ImmGen(ctrl.sel_imm, uop.inst)
-    val sel_alu1 = WireInit(ctrl.sel_alu1)
-    val sel_alu2 = WireInit(ctrl.sel_alu2)
-    val rs1_data = Mux(uop.rs1 === mem_uops_reg(0).bits.rd && mem_uops_reg(0).valid && mem_uops_reg(0).bits.ctrl.wxd,
-      mem_uops_reg(0).bits.wdata.bits,
-      uop.rs1_data)
-    val rs2_data = Mux(uop.rs2 === mem_uops_reg(0).bits.rd && mem_uops_reg(0).valid && mem_uops_reg(0).bits.ctrl.wxd,
-      mem_uops_reg(0).bits.wdata.bits,
-      uop.rs2_data)
-    val ex_op1 = MuxLookup(sel_alu1, 0.S, Seq(
-      A1_RS1 -> rs1_data.asSInt,
-      A1_PC -> uop.pc.asSInt
-    ))
-    val ex_op2 = MuxLookup(sel_alu2, 0.S, Seq(
-      A2_RS2 -> rs2_data.asSInt,
-      A2_IMM -> imm,
-      A2_SIZE -> Mux(uop.rvc, 2.S, 4.S)
-    ))
-    alu.io.dw := ctrl.alu_dw
-    alu.io.fn := ctrl.alu_fn
-    alu.io.in2 := ex_op2.asUInt
-    alu.io.in1 := ex_op1.asUInt
+  if (enableMemALU) {
+    for (i <- 1 until retireWidth) {
+      val alu = Module(new ALU)
+      val uop = mem_uops_reg(i).bits
+      val ctrl = mem_uops_reg(i).bits.ctrl
+      val imm = ImmGen(ctrl.sel_imm, uop.inst)
+      val sel_alu1 = WireInit(ctrl.sel_alu1)
+      val sel_alu2 = WireInit(ctrl.sel_alu2)
+      val rs1_data = Mux(uop.rs1 === mem_uops_reg(0).bits.rd && mem_uops_reg(0).valid && mem_uops_reg(0).bits.ctrl.wxd,
+        mem_uops_reg(0).bits.wdata.bits,
+        uop.rs1_data)
+      val rs2_data = Mux(uop.rs2 === mem_uops_reg(0).bits.rd && mem_uops_reg(0).valid && mem_uops_reg(0).bits.ctrl.wxd,
+        mem_uops_reg(0).bits.wdata.bits,
+        uop.rs2_data)
+      val ex_op1 = MuxLookup(sel_alu1, 0.S, Seq(
+        A1_RS1 -> rs1_data.asSInt,
+        A1_PC -> uop.pc.asSInt
+      ))
+      val ex_op2 = MuxLookup(sel_alu2, 0.S, Seq(
+        A2_RS2 -> rs2_data.asSInt,
+        A2_IMM -> imm,
+        A2_SIZE -> Mux(uop.rvc, 2.S, 4.S)
+      ))
+      alu.io.dw := ctrl.alu_dw
+      alu.io.fn := ctrl.alu_fn
+      alu.io.in2 := ex_op2.asUInt
+      alu.io.in1 := ex_op1.asUInt
 
-    when (uop.uses_memalu) {
-      mem_uops(i).bits.wdata.valid := true.B
-      mem_uops(i).bits.wdata.bits := alu.io.out
-      mem_bypasses(i).valid := mem_uops_reg(i).bits.ctrl.wxd && mem_uops_reg(i).valid
-      mem_bypasses(i).can_bypass := true.B
-      mem_bypasses(i).data := alu.io.out
+      when (uop.uses_memalu) {
+        mem_uops(i).bits.wdata.valid := true.B
+        mem_uops(i).bits.wdata.bits := alu.io.out
+        mem_bypasses(i).valid := mem_uops_reg(i).bits.ctrl.wxd && mem_uops_reg(i).valid
+        mem_bypasses(i).can_bypass := true.B
+        mem_bypasses(i).data := alu.io.out
+      }
     }
   }
 

@@ -13,8 +13,7 @@ import freechips.rocketchip.devices.tilelink.{BootROMParams, CLINTParams, PLICPa
 case class ShuttleCoreParams(
   nL2TLBEntries: Int = 512,
   nL2TLBWays: Int = 1,
-
-
+  enableMemALU: Boolean = true
 ) extends CoreParams
 {
   override def minFLen: Int = 16
