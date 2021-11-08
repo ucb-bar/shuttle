@@ -895,6 +895,16 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     io.imem.sfence.bits.asid := wb_uops(0).bits.rs2_data
   }
 
+  val replays = wb_uops.map({u => u.valid && u.bits.needs_replay})
+  for (i <- (0 until retireWidth).reverse) {
+    when (replays(i)) {
+      io.imem.redirect_val := true.B
+      io.imem.redirect_flush := true.B
+      io.imem.redirect_pc := wb_uops(i).bits.pc
+      io.imem.redirect_ras_head := wb_uops(i).bits.ras_head
+    }
+  }
+
   when (wb_uops_reg(0).valid && ((wb_uops(0).bits.csr_wen && !wb_uops(0).bits.needs_replay) ||
                                   wb_uops(0).bits.flush_pipe)) {
     flush_mem .foreach(_ := true.B)
@@ -922,7 +932,6 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       io.imem.redirect_ras_head := wb_uops(0).bits.ras_head
   }
 
-  val replays = wb_uops.map({u => u.valid && u.bits.needs_replay})
   when (replays.reduce(_||_)) {
     flush_mem .foreach(_ := true.B)
     flush_ex.foreach(_ := true.B)
@@ -945,14 +954,6 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       when (wb_uops(i).valid && wb_uops(i).bits.ctrl.wfd) {
         fsboard_wb_set(wb_uops(i).bits.rd) := true.B
       }
-    }
-  }
-  for (i <- (0 until retireWidth).reverse) {
-    when (replays(i)) {
-      io.imem.redirect_val := true.B
-      io.imem.redirect_flush := true.B
-      io.imem.redirect_pc := wb_uops(i).bits.pc
-      io.imem.redirect_ras_head := wb_uops(i).bits.ras_head
     }
   }
 
