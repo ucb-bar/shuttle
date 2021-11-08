@@ -37,6 +37,7 @@ class ShuttleICacheModule(outer: ShuttleICache) extends LazyModuleImp(outer)
   with HasL1ICacheParameters
 {
   override val cacheParams = outer.icacheParams
+  override def tlBundleParams = outer.masterNode.out.head._2.bundle
 
   val io = IO(new Bundle {
     val req = Flipped(new DecoupledIO(UInt(vaddrBits.W)))

@@ -88,7 +88,7 @@ class ShuttleTile private(
   }
 
   val frontend = LazyModule(new ShuttleFrontend(tileParams.icache.get, staticIdForMetadataUseOnly))
-  tlMasterXbar.node := TLBuffer() := frontend.masterNode
+  tlMasterXbar.node := TLBuffer() := TLWidthWidget(tileParams.icache.get.fetchBytes) := frontend.masterNode
   frontend.resetVectorSinkNode := resetVectorNexusNode
   nPTWPorts += 1
 

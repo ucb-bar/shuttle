@@ -10,14 +10,14 @@ import freechips.rocketchip.diplomacy.{SynchronousCrossing, AsynchronousCrossing
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.tile._
 
-class WithNShuttleCores(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Config((site, here, up) => {
-    case TilesLocated(InSubsystem) => {
-      val prev = up(TilesLocated(InSubsystem), site)
-      val idOffset = overrideIdOffset.getOrElse(prev.size)
+class WithNShuttleCores(n: Int = 1, retireWidth: Int = 2, overrideIdOffset: Option[Int] = None) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => {
+    val prev = up(TilesLocated(InSubsystem), site)
+    val idOffset = overrideIdOffset.getOrElse(prev.size)
       (0 until n).map { i =>
         ShuttleTileAttachParams(
           tileParams = ShuttleTileParams(
-            core = ShuttleCoreParams(),
+            core = ShuttleCoreParams(retireWidth = retireWidth),
             btb = Some(BTBParams(nEntries=32)),
             dcache = Some(
               DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=1)
@@ -34,3 +34,23 @@ class WithNShuttleCores(n: Int = 1, overrideIdOffset: Option[Int] = None) extend
     case XLen => 64
 })
 
+class WithShuttleRetireWidth(w: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      core = tp.tileParams.core.copy(retireWidth = w)
+    ))
+    case other => other
+  }
+
+})
+
+
+class WithShuttleWideFetch extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      core = tp.tileParams.core.copy(fetchWidth = 8),
+      icache = tp.tileParams.icache.map(_.copy(fetchBytes = 8 * 2))
+    ))
+    case other => other
+  }
+})

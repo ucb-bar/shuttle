@@ -268,7 +268,6 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   f2_fetch_bundle.btb_resp   := s2_btb_resp
   f2_fetch_bundle.ras_head   := s2_ras_head
 
-  require(fetchWidth == 4)
   def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
 
   def isJALR(exp_inst: UInt) = exp_inst(6,0) === Instructions.JALR.value.asUInt()(6,0)

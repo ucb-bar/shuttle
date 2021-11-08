@@ -15,14 +15,15 @@ case class ShuttleCoreParams(
   nL2TLBWays: Int = 1,
 
   enableMemALU: Boolean = true,
-  retireWidth: Int = 2
+  retireWidth: Int = 2,
+  fetchWidth: Int = 4
 ) extends CoreParams
 {
+  require (fetchWidth == 4 || fetchWidth == 8)
   override def minFLen: Int = 16
 
   val bootFreqHz: BigInt = 0
-  val decodeWidth: Int = 4
-  val fetchWidth: Int = 4
+  val decodeWidth: Int = fetchWidth
   val fpu: Option[freechips.rocketchip.tile.FPUParams] = Some(FPUParams(minFLen = 16,
     sfmaLatency=4, dfmaLatency=4, divSqrt=true))
   val haveBasicCounters: Boolean = true
