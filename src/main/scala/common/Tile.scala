@@ -87,6 +87,10 @@ class ShuttleTile private(
     }
   }
 
+  ResourceBinding {
+    Resource(cpuDevice, "reg").bind(ResourceAddress(staticIdForMetadataUseOnly))
+  }
+
   val frontend = LazyModule(new ShuttleFrontend(tileParams.icache.get, staticIdForMetadataUseOnly))
   tlMasterXbar.node := TLBuffer() := TLWidthWidget(tileParams.icache.get.fetchBytes) := frontend.masterNode
   frontend.resetVectorSinkNode := resetVectorNexusNode

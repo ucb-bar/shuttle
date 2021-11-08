@@ -19,7 +19,7 @@ case class ShuttleCoreParams(
   fetchWidth: Int = 4
 ) extends CoreParams
 {
-  require (fetchWidth == 4 || fetchWidth == 8)
+  require(Seq(4, 8, 16, 32).contains(fetchWidth))
   override def minFLen: Int = 16
 
   val bootFreqHz: BigInt = 0

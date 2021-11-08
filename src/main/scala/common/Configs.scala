@@ -45,11 +45,11 @@ class WithShuttleRetireWidth(w: Int) extends Config((site, here, up) => {
 })
 
 
-class WithShuttleWideFetch extends Config((site, here, up) => {
+class WithShuttleFetchWidth(bytes: Int) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
-      core = tp.tileParams.core.copy(fetchWidth = 8),
-      icache = tp.tileParams.icache.map(_.copy(fetchBytes = 8 * 2))
+      core = tp.tileParams.core.copy(fetchWidth = bytes / 2),
+      icache = tp.tileParams.icache.map(_.copy(fetchBytes = bytes))
     ))
     case other => other
   }
