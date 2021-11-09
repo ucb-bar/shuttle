@@ -22,7 +22,7 @@ trait HasShuttleFrontendParameters extends HasL1ICacheParameters
   def nextFetch(addr: UInt) = fetchAlign(addr) + fetchBytes.U
   def fetchMask(addr: UInt) = {
     val idx = addr.extract(log2Ceil(fetchWidth)+log2Ceil(coreInstBytes)-1, log2Ceil(coreInstBytes))
-    ((1 << fetchWidth)-1).U << idx
+    ((BigInt(1) << fetchWidth)-1).U << idx
   }
 }
 

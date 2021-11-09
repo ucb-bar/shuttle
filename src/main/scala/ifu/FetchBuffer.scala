@@ -14,7 +14,7 @@ import shuttle.util._
 class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
 {
 
-  val numEntries = 8
+  val numEntries = fetchWidth
   val io = IO(new Bundle {
     val enq = Flipped(Decoupled(new ShuttleFetchBundle))
     val deq = Vec(retireWidth, Decoupled(new ShuttleUOP))
@@ -25,6 +25,7 @@ class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
   val ram = Reg(Vec(numEntries, Valid(new ShuttleUOP)))
   val enq_ptr = RegInit(1.U(numEntries.W))
   val deq_ptr = RegInit(1.U(numEntries.W))
+  require(numEntries >= fetchWidth)
   io.enq.ready := PopCount(ram.map(_.valid)) +& PopCount(io.enq.bits.mask) <= numEntries.U
 
   // Input microops.
