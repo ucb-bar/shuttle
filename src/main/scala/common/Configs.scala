@@ -23,7 +23,7 @@ class WithNShuttleCores(n: Int = 1, retireWidth: Int = 2, overrideIdOffset: Opti
               DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=1)
             ),
             icache = Some(
-              ICacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, fetchBytes=2*4)
+              ICacheParams(rowBits = -1, nSets=64, nWays=8, fetchBytes=2*4)
             ),
             hartId = i + idOffset
           ),

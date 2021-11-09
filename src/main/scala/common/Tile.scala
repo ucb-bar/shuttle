@@ -59,7 +59,7 @@ class ShuttleTile private(
   lookup: LookupByHartIdImpl,
   q: Parameters)
     extends BaseTile(shuttleParams, crossing, lookup, q)
-    with HasLazyRoCC
+    with HasTileParameters
     with SinksExternalInterrupts
     with SourcesExternalNotifications
     with WithExtendedTraceport
@@ -90,11 +90,27 @@ class ShuttleTile private(
   ResourceBinding {
     Resource(cpuDevice, "reg").bind(ResourceAddress(staticIdForMetadataUseOnly))
   }
+  val roccs = p(BuildRoCC).map(_(p))
+
+  roccs.map(_.atlNode).foreach { atl => tlMasterXbar.node :=* atl }
+  roccs.map(_.tlNode).foreach { tl => tlOtherMastersNode :=* tl }
+
+  var nPTWPorts = 1
+  var nDCachePorts = 0
+  nDCachePorts += usingPTW.toInt
 
   val frontend = LazyModule(new ShuttleFrontend(tileParams.icache.get, staticIdForMetadataUseOnly))
   tlMasterXbar.node := TLBuffer() := TLWidthWidget(tileParams.icache.get.fetchBytes) := frontend.masterNode
   frontend.resetVectorSinkNode := resetVectorNexusNode
   nPTWPorts += 1
+
+  nPTWPorts += roccs.map(_.nPTWPorts).sum
+  nDCachePorts += roccs.size
+
+  val dcache: HellaCache = LazyModule(p(BuildHellaCache)(this)(p))
+  tlMasterXbar.node := TLBuffer() := dcache.node
+  dcache.hartIdSinkNodeOpt.map { _ := hartIdNexusNode }
+  dcache.mmioAddressPrefixSinkNodeOpt.map { _ := mmioAddressPrefixNexusNode }
 
   nDCachePorts += 1 /* core */
 
@@ -102,9 +118,9 @@ class ShuttleTile private(
 }
 
 class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
-  with CanHavePTWModule
 {
-  ptwPorts += outer.frontend.module.io.ptw
+  val dcachePorts = ListBuffer[HellaCacheIO]()
+  val ptwPorts = ListBuffer(outer.dcache.module.io.ptw)
 
   val core = Module(new ShuttleCore(outer)(outer.p))
   outer.decodeCoreInterrupts(core.io.interrupts) // Decode the interrupt vector
@@ -118,7 +134,6 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
   // Connect the core pipeline to other intra-tile modules
   outer.frontend.module.io.cpu <> core.io.imem
   dcachePorts += core.io.dmem // TODO outer.dcachePorts += () => module.core.io.dmem ??
-  core.io.ptw <> ptw.io.dpath
 
   // Connect the coprocessor interfaces
   core.io.rocc := DontCare
@@ -162,6 +177,19 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
     core.io.rocc.busy <> (cmdRouter.io.busy || outer.roccs.map(_.module.io.busy).reduce(_ || _))
     core.io.rocc.interrupt := outer.roccs.map(_.module.io.interrupt).reduce(_ || _)
   }
+
+
+  val dcacheArb = Module(new HellaCacheArbiter(outer.nDCachePorts)(outer.p))
+  outer.dcache.module.io.cpu <> dcacheArb.io.mem
+
+  ptwPorts += outer.frontend.module.io.ptw
+
+  val ptw = Module(new PTW(outer.nPTWPorts)(outer.dcache.node.edges.out(0), outer.p))
+  if (outer.usingPTW) {
+    dcachePorts += ptw.io.mem
+  }
+
+  core.io.ptw <> ptw.io.dpath
 
   // TODO eliminate this redundancy
   val h = dcachePorts.size
