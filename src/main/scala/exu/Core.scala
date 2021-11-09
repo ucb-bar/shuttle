@@ -93,6 +93,33 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   io.imem.flush_icache := false.B
   // rrd
   rrd_uops := io.imem.resp
+  (rrd_uops zip io.imem.resp).foreach { case (l,r) =>
+    val pipelinedMul = true
+    val decode_table = {
+      (if (usingMulDiv) new MDecode(pipelinedMul) +: (xLen > 32).option(new M64Decode(pipelinedMul)).toSeq else Nil) ++:
+      (if (usingAtomics) new ADecode +: (xLen > 32).option(new A64Decode).toSeq else Nil) ++:
+      (if (fLen >= 32)    new FDecode +: (xLen > 32).option(new F64Decode).toSeq else Nil) ++:
+      (if (fLen >= 64)    new DDecode +: (xLen > 32).option(new D64Decode).toSeq else Nil) ++:
+      (if (minFLen == 16) new HDecode +: (xLen > 32).option(new H64Decode).toSeq ++: (fLen >= 64).option(new HDDecode).toSeq else Nil) ++:
+      (usingRoCC.option(new RoCCDecode)) ++:
+      (if (xLen == 32) new I32Decode else new I64Decode) +:
+      (usingVM.option(new SVMDecode)) ++:
+      (usingSupervisor.option(new SDecode)) ++:
+      (usingDebug.option(new DebugDecode)) ++:
+      (usingNMI.option(new NMIDecode)) ++:
+        Seq(new FenceIDecode(false)) ++:
+      Seq(new IDecode)
+    } flatMap(_.table)
+
+    def fp_decode(inst: UInt) = {
+      val fp_decoder = Module(new FPUDecoder)
+      fp_decoder.io.inst := inst
+      fp_decoder.io.sigs
+    }
+
+    l.bits.ctrl.decode(r.bits.inst, decode_table)
+    l.bits.fp_ctrl := fp_decode(r.bits.inst)
+  }
 
   for (i <- 0 until retireWidth) {
     csr.io.decode(i).csr := rrd_uops(i).bits.inst(31,20)

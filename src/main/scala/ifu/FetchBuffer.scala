@@ -39,8 +39,8 @@ class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
     in_uops(i).valid               := io.enq.valid && io.enq.bits.mask(i)
     in_uops(i).bits                := DontCare
     in_uops(i).bits.pc             := io.enq.bits.pcs(i)
-    in_uops(i).bits.ctrl           := io.enq.bits.ctrl_sigs(i)
-    in_uops(i).bits.fp_ctrl        := io.enq.bits.fp_ctrl_sigs(i)
+    in_uops(i).bits.ctrl           := DontCare
+    in_uops(i).bits.fp_ctrl        := DontCare
     in_uops(i).bits.inst           := io.enq.bits.exp_insts(i)
     in_uops(i).bits.raw_inst       := io.enq.bits.insts(i)
     in_uops(i).bits.rvc            := io.enq.bits.insts(i)(1,0) =/= 3.U
