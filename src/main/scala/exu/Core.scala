@@ -1,4 +1,4 @@
-package shuttle.exu
+package saturn.exu
 
 import chisel3._
 import chisel3.util._
@@ -7,17 +7,17 @@ import freechips.rocketchip.tile._
 import freechips.rocketchip.util._
 import freechips.rocketchip.rocket._
 
-import shuttle.common._
-import shuttle.ifu._
-import shuttle.util._
+import saturn.common._
+import saturn.ifu._
+import saturn.util._
 
-class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule()(p)
+class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(p)
   with HasFPUParameters
 {
   val io = IO(new Bundle {
     val hartid = Input(UInt(hartIdLen.W))
     val interrupts = Input(new CoreInterrupts())
-    val imem  = new ShuttleFrontendIO
+    val imem  = new SaturnFrontendIO
     val dmem = new HellaCacheIO
     val ptw = Flipped(new DatapathPTWIO())
     val rocc = Flipped(new RoCCCoreIO())
@@ -57,11 +57,11 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   val ll_bypass: Seq[Bypass] = Seq(Wire(new Bypass))
   val int_bypasses: Seq[Bypass] = ll_bypass ++ wb_bypasses ++ mem_bypasses ++ ex_bypasses
 
-  val ex_uops_reg = Reg(Vec(retireWidth, Valid(new ShuttleUOP)))
-  val mem_uops_reg = Reg(Vec(retireWidth, Valid(new ShuttleUOP)))
-  val wb_uops_reg = Reg(Vec(retireWidth, Valid(new ShuttleUOP)))
+  val ex_uops_reg = Reg(Vec(retireWidth, Valid(new SaturnUOP)))
+  val mem_uops_reg = Reg(Vec(retireWidth, Valid(new SaturnUOP)))
+  val wb_uops_reg = Reg(Vec(retireWidth, Valid(new SaturnUOP)))
 
-  val rrd_uops = Wire(Vec(retireWidth, Valid(new ShuttleUOP)))
+  val rrd_uops = Wire(Vec(retireWidth, Valid(new SaturnUOP)))
   val ex_uops = WireInit(ex_uops_reg)
   val mem_uops = WireInit(mem_uops_reg)
   val wb_uops = WireInit(wb_uops_reg)
@@ -203,7 +203,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
 
   val rrd_stall_data = Wire(Vec(retireWidth, Bool()))
   val rrd_irf_writes = Wire(Vec(retireWidth, Valid(UInt(5.W))))
-  val enableMemALU = coreParams.asInstanceOf[ShuttleCoreParams].enableMemALU && retireWidth > 1
+  val enableMemALU = coreParams.asInstanceOf[SaturnCoreParams].enableMemALU && retireWidth > 1
   val rrd_mem_p0_can_forward = rrd_uops(0).bits.ctrl.wxd && rrd_uops(0).bits.uses_alu && enableMemALU.B
   for (i <- 0 until retireWidth) {
     val fp_ctrl = rrd_uops(i).bits.fp_ctrl
@@ -413,7 +413,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     req
   }
 
-  val fmas = Module(new ShuttleFPUFMAPipe(fpParams.dfmaLatency))
+  val fmas = Module(new SaturnFPUFMAPipe(fpParams.dfmaLatency))
   fmas.io.in.valid := ex_fp_ctrl.fma && ex_fp_fire && !ex_fp_uop.bits.xcpt
   fmas.io.in.bits := Mux(ex_fp_ctrl.typeTagOut === D, fuInput(Some(FType.D), ex_fp_ctrl, ex_fp_rm, ex_fp_inst),
     Mux(ex_fp_ctrl.typeTagOut === S, fuInput(Some(FType.S), ex_fp_ctrl, ex_fp_rm, ex_fp_inst),
@@ -424,7 +424,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     ex_fp_fire && !ex_fp_uop.bits.xcpt)
   fpiu.io.in.bits := fuInput(None, ex_fp_ctrl, ex_fp_rm, ex_fp_inst)
 
-  val ifpu = Module(new ShuttleIntToFP)
+  val ifpu = Module(new SaturnIntToFP)
   ifpu.io.in.valid := (ex_ifpu_oh zip ex_fire).map({case (l,r) => l && r}).reduce(_||_) && !ex_ifpu_uop.bits.xcpt
   ifpu.io.in.bits := fuInput(None, ex_ifpu_uop.bits.fp_ctrl,
     Mux(ex_ifpu_inst(14,12) === 7.U, io.fcsr_rm, ex_ifpu_inst(14,12)), ex_ifpu_inst)
@@ -433,7 +433,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   ifpu.io.in_lt := DontCare
   ifpu.io.in_out_tag := ex_ifpu_uop.bits.fp_ctrl.typeTagOut
 
-  val fpmu = Module(new ShuttleFPToFP)
+  val fpmu = Module(new SaturnFPToFP)
   fpmu.io.in.valid := ex_fp_fire && ex_fp_ctrl.fastpipe && !ex_fp_uop.bits.xcpt
   fpmu.io.in.bits := fpiu.io.in.bits
 
@@ -443,7 +443,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   fpus.foreach(_.io.in_out_tag := ex_fp_ctrl.typeTagOut)
   val ex_fp_stall = (Seq(ifpu) ++ fpus).map(!_.io.ready).reduce(_||_)
 
-  val mulDivParams = tileParams.core.asInstanceOf[ShuttleCoreParams].mulDiv.get
+  val mulDivParams = tileParams.core.asInstanceOf[SaturnCoreParams].mulDiv.get
   require(mulDivParams.mulUnroll == 0)
   val mul = Module(new PipelinedMultiplier(64, 2))
   mul.io.req.valid := ex_uops_reg(0).valid && ex_uops_reg(0).bits.ctrl.mul && ex_fire(0)

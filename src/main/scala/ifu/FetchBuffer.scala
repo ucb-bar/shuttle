@@ -1,4 +1,4 @@
-package shuttle.ifu
+package saturn.ifu
 
 import chisel3._
 import chisel3.util._
@@ -8,28 +8,28 @@ import freechips.rocketchip.rocket._
 import freechips.rocketchip.config.{Parameters}
 import freechips.rocketchip.rocket.{MStatus, BP, BreakpointUnit}
 
-import shuttle.common._
-import shuttle.util._
+import saturn.common._
+import saturn.util._
 
-class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
+class SaturnFetchBuffer(implicit p: Parameters) extends CoreModule
 {
 
   val numEntries = fetchWidth
   val io = IO(new Bundle {
-    val enq = Flipped(Decoupled(new ShuttleFetchBundle))
-    val deq = Vec(retireWidth, Decoupled(new ShuttleUOP))
-    val peek = Vec(retireWidth, Valid(new ShuttleUOP))
+    val enq = Flipped(Decoupled(new SaturnFetchBundle))
+    val deq = Vec(retireWidth, Decoupled(new SaturnUOP))
+    val peek = Vec(retireWidth, Valid(new SaturnUOP))
 
     val clear = Input(Bool())
   })
-  val ram = Reg(Vec(numEntries, Valid(new ShuttleUOP)))
+  val ram = Reg(Vec(numEntries, Valid(new SaturnUOP)))
   val enq_ptr = RegInit(1.U(numEntries.W))
   val deq_ptr = RegInit(1.U(numEntries.W))
   require(numEntries >= fetchWidth)
   io.enq.ready := PopCount(ram.map(_.valid)) +& PopCount(io.enq.bits.mask) <= numEntries.U
 
   // Input microops.
-  val in_uops = Wire(Vec(fetchWidth, Valid(new ShuttleUOP)))
+  val in_uops = Wire(Vec(fetchWidth, Valid(new SaturnUOP)))
 
   // Step 1: Convert FetchPacket into a vector of MicroOps.
   val lower = Wire(UInt(fetchWidth.W))

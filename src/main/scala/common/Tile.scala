@@ -1,4 +1,4 @@
-package shuttle.common
+package saturn.common
 
 import chisel3._
 import chisel3.util.{RRArbiter, Queue}
@@ -20,22 +20,22 @@ import freechips.rocketchip.prci.ClockSinkParameters
 
 import testchipip.{ExtendedTracedInstruction, WithExtendedTraceport}
 
-import shuttle.ifu._
-import shuttle.exu._
+import saturn.ifu._
+import saturn.exu._
 
-case class ShuttleTileParams(
-  core: ShuttleCoreParams = ShuttleCoreParams(),
+case class SaturnTileParams(
+  core: SaturnCoreParams = SaturnCoreParams(),
   icache: Option[ICacheParams] = Some(ICacheParams(prefetch=true)),
   dcache: Option[DCacheParams] = Some(DCacheParams()),
   trace: Boolean = false,
-  name: Option[String] = Some("shuttle_tile"),
+  name: Option[String] = Some("saturn_tile"),
   btb: Option[BTBParams] = Some(BTBParams()),
-  hartId: Int = 0) extends InstantiableTileParams[ShuttleTile]
+  hartId: Int = 0) extends InstantiableTileParams[SaturnTile]
 {
   require(icache.isDefined)
   require(dcache.isDefined)
-  def instantiate(crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters): ShuttleTile = {
-    new ShuttleTile(this, crossing, lookup)
+  def instantiate(crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters): SaturnTile = {
+    new SaturnTile(this, crossing, lookup)
   }
 
   val beuAddr: Option[BigInt] = None
@@ -45,27 +45,27 @@ case class ShuttleTileParams(
 }
 
 
-case class ShuttleTileAttachParams(
-  tileParams: ShuttleTileParams,
+case class SaturnTileAttachParams(
+  tileParams: SaturnTileParams,
   crossingParams: RocketCrossingParams
 ) extends CanAttachTile {
-  type TileType = ShuttleTile
+  type TileType = SaturnTile
   val lookup = PriorityMuxHartIdFromSeq(Seq(tileParams))
 }
 
-class ShuttleTile private(
-  val shuttleParams: ShuttleTileParams,
+class SaturnTile private(
+  val saturnParams: SaturnTileParams,
   crossing: ClockCrossingType,
   lookup: LookupByHartIdImpl,
   q: Parameters)
-    extends BaseTile(shuttleParams, crossing, lookup, q)
+    extends BaseTile(saturnParams, crossing, lookup, q)
     with HasTileParameters
     with SinksExternalInterrupts
     with SourcesExternalNotifications
     with WithExtendedTraceport
 {
   // Private constructor ensures altered LazyModule.p is used implicitly
-  def this(params: ShuttleTileParams, crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters) =
+  def this(params: SaturnTileParams, crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters) =
     this(params, crossing.crossingType, lookup, p)
 
   val intOutwardNode = IntIdentityNode()
@@ -76,7 +76,7 @@ class ShuttleTile private(
   masterNode :=* tlOtherMastersNode
 
 
-  val cpuDevice: SimpleDevice = new SimpleDevice("cpu", Seq("ucb-bar,shuttle", "riscv")) {
+  val cpuDevice: SimpleDevice = new SimpleDevice("cpu", Seq("ucb-bar,saturn", "riscv")) {
     override def parent = Some(ResourceAnchors.cpus)
     override def describe(resources: ResourceBindings): Description = {
       val Description(name, mapping) = super.describe(resources)
@@ -99,7 +99,7 @@ class ShuttleTile private(
   var nDCachePorts = 0
   nDCachePorts += usingPTW.toInt
 
-  val frontend = LazyModule(new ShuttleFrontend(tileParams.icache.get, staticIdForMetadataUseOnly))
+  val frontend = LazyModule(new SaturnFrontend(tileParams.icache.get, staticIdForMetadataUseOnly))
   tlMasterXbar.node := TLBuffer() := TLWidthWidget(tileParams.icache.get.fetchBytes) := frontend.masterNode
   frontend.resetVectorSinkNode := resetVectorNexusNode
   nPTWPorts += 1
@@ -114,15 +114,15 @@ class ShuttleTile private(
 
   nDCachePorts += 1 /* core */
 
-  override lazy val module = new ShuttleTileModuleImp(this)
+  override lazy val module = new SaturnTileModuleImp(this)
 }
 
-class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
+class SaturnTileModuleImp(outer: SaturnTile) extends BaseTileModuleImp(outer)
 {
   val dcachePorts = ListBuffer[HellaCacheIO]()
   val ptwPorts = ListBuffer(outer.dcache.module.io.ptw)
 
-  val core = Module(new ShuttleCore(outer)(outer.p))
+  val core = Module(new SaturnCore(outer)(outer.p))
   outer.decodeCoreInterrupts(core.io.interrupts) // Decode the interrupt vector
 
   // Pass through various external constants and reports that were bundle-bridged into the tile

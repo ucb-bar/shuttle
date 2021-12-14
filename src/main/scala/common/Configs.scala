@@ -1,4 +1,4 @@
-package shuttle.common
+package saturn.common
 
 import chisel3._
 import chisel3.util.{log2Up}
@@ -10,14 +10,14 @@ import freechips.rocketchip.diplomacy.{SynchronousCrossing, AsynchronousCrossing
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.tile._
 
-class WithNShuttleCores(n: Int = 1, retireWidth: Int = 2, overrideIdOffset: Option[Int] = None) extends Config((site, here, up) => {
+class WithNSaturnCores(n: Int = 1, retireWidth: Int = 2, overrideIdOffset: Option[Int] = None) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => {
     val prev = up(TilesLocated(InSubsystem), site)
     val idOffset = overrideIdOffset.getOrElse(prev.size)
       (0 until n).map { i =>
-        ShuttleTileAttachParams(
-          tileParams = ShuttleTileParams(
-            core = ShuttleCoreParams(retireWidth = retireWidth),
+        SaturnTileAttachParams(
+          tileParams = SaturnTileParams(
+            core = SaturnCoreParams(retireWidth = retireWidth),
             btb = Some(BTBParams(nEntries=32)),
             dcache = Some(
               DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=1)
@@ -34,9 +34,9 @@ class WithNShuttleCores(n: Int = 1, retireWidth: Int = 2, overrideIdOffset: Opti
     case XLen => 64
 })
 
-class WithShuttleRetireWidth(w: Int) extends Config((site, here, up) => {
+class WithSaturnRetireWidth(w: Int) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
-    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+    case tp: SaturnTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       core = tp.tileParams.core.copy(retireWidth = w)
     ))
     case other => other
@@ -45,9 +45,9 @@ class WithShuttleRetireWidth(w: Int) extends Config((site, here, up) => {
 })
 
 
-class WithShuttleFetchWidth(bytes: Int) extends Config((site, here, up) => {
+class WithSaturnFetchWidth(bytes: Int) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
-    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+    case tp: SaturnTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       core = tp.tileParams.core.copy(fetchWidth = bytes / 2),
       icache = tp.tileParams.icache.map(_.copy(fetchBytes = bytes))
     ))

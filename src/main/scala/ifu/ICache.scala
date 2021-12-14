@@ -1,4 +1,4 @@
-package shuttle.ifu
+package saturn.ifu
 
 import chisel3._
 import chisel3.util._
@@ -18,12 +18,12 @@ import freechips.rocketchip.diplomaticobjectmodel.logicaltree.{LogicalTreeNode}
 import freechips.rocketchip.diplomaticobjectmodel.DiplomaticObjectModelAddressing
 import freechips.rocketchip.diplomaticobjectmodel.model.{OMComponent, OMICache, OMECC}
 
-class ShuttleICache(
+class SaturnICache(
   val icacheParams: ICacheParams,
   val staticIdForMetadataUseOnly: Int)(implicit p: Parameters)
     extends LazyModule
 {
-  lazy val module = new ShuttleICacheModule(this)
+  lazy val module = new SaturnICacheModule(this)
   val masterNode = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1(
     sourceId = IdRange(0, 1 + icacheParams.prefetch.toInt), // 0=refill, 1=hint
     name = s"Core ${staticIdForMetadataUseOnly} ICache")))))
@@ -33,7 +33,7 @@ class ShuttleICache(
 }
 
 
-class ShuttleICacheModule(outer: ShuttleICache) extends LazyModuleImp(outer)
+class SaturnICacheModule(outer: SaturnICache) extends LazyModuleImp(outer)
   with HasL1ICacheParameters
 {
   override val cacheParams = outer.icacheParams

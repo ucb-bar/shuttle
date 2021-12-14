@@ -1,4 +1,4 @@
-package shuttle.exu
+package saturn.exu
 
 import chisel3._
 import chisel3.util._
@@ -10,8 +10,8 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.util.property._
 import freechips.rocketchip.tile._
 
-class ShuttleFPUFMAPipe(latency: Int)(implicit p: Parameters)
-    extends ShuttleFPUPipe(latency)(p) {
+class SaturnFPUFMAPipe(latency: Int)(implicit p: Parameters)
+    extends SaturnFPUPipe(latency)(p) {
 
   val dfma = Module(new FPUFMAPipe(latency, FType.D))
   val sfma = Module(new FPUFMAPipe(latency, FType.S))
@@ -24,7 +24,7 @@ class ShuttleFPUFMAPipe(latency: Int)(implicit p: Parameters)
   }
 }
 
-class ShuttleIntToFP(implicit p: Parameters) extends ShuttleFPUPipe(2)(p) {
+class SaturnIntToFP(implicit p: Parameters) extends SaturnFPUPipe(2)(p) {
   val ifpu = Module(new IntToFP(2))
   ifpu.io.in := io.in
   when (ifpu.io.out.valid) {
@@ -32,7 +32,7 @@ class ShuttleIntToFP(implicit p: Parameters) extends ShuttleFPUPipe(2)(p) {
   }
 }
 
-class ShuttleFPToFP(implicit p: Parameters) extends ShuttleFPUPipe(2)(p) {
+class SaturnFPToFP(implicit p: Parameters) extends SaturnFPUPipe(2)(p) {
   val fpmu = Module(new FPToFP(2))
   fpmu.io.lt := io.in_lt
   fpmu.io.in := io.in
@@ -42,7 +42,7 @@ class ShuttleFPToFP(implicit p: Parameters) extends ShuttleFPUPipe(2)(p) {
   }
 }
 
-abstract class ShuttleFPUPipe(val latency: Int)
+abstract class SaturnFPUPipe(val latency: Int)
   (implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetimed {
   val io = new Bundle {
     val ready = Output(Bool())
