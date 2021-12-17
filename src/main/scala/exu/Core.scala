@@ -25,6 +25,12 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     val fcsr_rm = Output(UInt(FPConstants.RM_SZ.W))
   })
 
+  val debug_tsc_reg = RegInit(0.U(64.W))
+  debug_tsc_reg := debug_tsc_reg + 1.U
+  dontTouch(debug_tsc_reg)
+  val debug_irt_reg = RegInit(0.U(64.W))
+  dontTouch(debug_irt_reg)
+
   // EventSet can't handle empty
   val events = new EventSets(Seq(new EventSet((mask, hit) => false.B, Seq(("placeholder", () => false.B)))))
   val csr = Module(new CSRFile(perfEventSets=events))
@@ -783,6 +789,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   csr.io.exception := wb_uops(0).bits.xcpt && !wb_uops(0).bits.needs_replay && wb_fire(0)
   csr.io.cause := wb_xcpt_uop.bits.xcpt_cause
   csr.io.retire := PopCount(wb_fire zip wb_uops map { case (f, u) => f && !u.bits.xcpt && !u.bits.needs_replay })
+  debug_irt_reg := debug_irt_reg + csr.io.retire
   csr.io.pc := wb_uops_reg(0).bits.pc
   var found_valid = wb_uops_reg(0).valid
   for (i <- 1 until retireWidth) {
