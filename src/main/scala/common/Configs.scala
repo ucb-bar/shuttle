@@ -20,7 +20,7 @@ class WithNSaturnCores(n: Int = 1, retireWidth: Int = 2, overrideIdOffset: Optio
             core = SaturnCoreParams(retireWidth = retireWidth),
             btb = Some(BTBParams(nEntries=32)),
             dcache = Some(
-              DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=1)
+              DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=4)
             ),
             icache = Some(
               ICacheParams(rowBits = -1, nSets=64, nWays=8, fetchBytes=2*4)
