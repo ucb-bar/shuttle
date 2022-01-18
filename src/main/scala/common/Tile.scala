@@ -122,6 +122,11 @@ class SaturnTileModuleImp(outer: SaturnTile) extends BaseTileModuleImp(outer)
   val dcachePorts = ListBuffer[HellaCacheIO]()
   val ptwPorts = ListBuffer(outer.dcache.module.io.ptw)
 
+  val ptw = Module(new PTW(outer.nPTWPorts)(outer.dcache.node.edges.out(0), outer.p))
+  if (outer.usingPTW) {
+    dcachePorts += ptw.io.mem
+  }
+
   val core = Module(new SaturnCore(outer)(outer.p))
   outer.decodeCoreInterrupts(core.io.interrupts) // Decode the interrupt vector
 
@@ -184,10 +189,6 @@ class SaturnTileModuleImp(outer: SaturnTile) extends BaseTileModuleImp(outer)
 
   ptwPorts += outer.frontend.module.io.ptw
 
-  val ptw = Module(new PTW(outer.nPTWPorts)(outer.dcache.node.edges.out(0), outer.p))
-  if (outer.usingPTW) {
-    dcachePorts += ptw.io.mem
-  }
 
   core.io.ptw <> ptw.io.dpath
 
