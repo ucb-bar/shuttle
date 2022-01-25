@@ -54,3 +54,39 @@ class WithSaturnFetchWidth(bytes: Int) extends Config((site, here, up) => {
     case other => other
   }
 })
+
+class WithL1ICacheSets(sets: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: SaturnTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      icache = tp.tileParams.icache.map(_.copy(nSets = sets))
+    ))
+    case other => other
+  }
+})
+
+class WithL1DCacheSets(sets: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: SaturnTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      dcache = tp.tileParams.dcache.map(_.copy(nSets = sets))
+    ))
+    case other => other
+  }
+})
+
+class WithL1ICacheWays(ways: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: SaturnTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      icache = tp.tileParams.icache.map(_.copy(nWays = ways))
+    ))
+    case other => other
+  }
+})
+
+class WithL1DCacheWays(ways: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: SaturnTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      dcache = tp.tileParams.dcache.map(_.copy(nWays = ways))
+    ))
+    case other => other
+  }
+})
