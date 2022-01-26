@@ -90,3 +90,12 @@ class WithL1DCacheWays(ways: Int) extends Config((site, here, up) => {
     case other => other
   }
 })
+
+class WithL1DCacheMSHRs(n: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: SaturnTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      dcache = tp.tileParams.dcache.map(_.copy(nMSHRs = n))
+    ))
+    case other => other
+  }
+})
