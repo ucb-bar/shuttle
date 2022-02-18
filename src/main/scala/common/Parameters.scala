@@ -16,7 +16,8 @@ case class SaturnCoreParams(
 
   enableMemALU: Boolean = true,
   retireWidth: Int = 2,
-  fetchWidth: Int = 4
+  fetchWidth: Int = 4,
+  override val useBitManip: Boolean = false
 ) extends CoreParams
 {
   require(Seq(4, 8, 16, 32).contains(fetchWidth))

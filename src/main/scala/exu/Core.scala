@@ -6,6 +6,7 @@ import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.tile._
 import freechips.rocketchip.util._
 import freechips.rocketchip.rocket._
+import freechips.rocketchip.rocket.Instructions._
 
 import saturn.common._
 import saturn.ifu._
@@ -93,14 +94,20 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   val mem_bsy = mem_uops_reg.map(_.valid).reduce(_||_)
   val wb_bsy = wb_uops_reg.map(_.valid).reduce(_||_)
 
-
   io.imem.redirect_val := false.B
   io.imem.redirect_flush := false.B
   io.imem.flush_icache := false.B
   // rrd
   rrd_uops := io.imem.resp
   (rrd_uops zip io.imem.resp).foreach { case (l,r) =>
-    val pipelinedMul = true
+    val bitmanipMasks = Seq(
+      ANDN, ORN, XNOR, CLZ, CLZW, CTZ, CTZW,
+      PCNT, PCNTW, MAX, MAXU, MIN, MINU,
+      SEXT_B, SEXT_H, ZEXT_H,
+      ROL, ROLW, ROR, RORI, RORIW, RORW,
+      ORC_B, REV8, PACK)
+    val is_bitmanip = bitmanipMasks.map(m => r.bits.inst === m).reduce(_||_) && usingBitManip.B
+    val pipelinedMul = true //pipeline VS iterative
     val decode_table = {
       (if (usingMulDiv) new MDecode(pipelinedMul) +: (xLen > 32).option(new M64Decode(pipelinedMul)).toSeq else Nil) ++:
       (if (usingAtomics) new ADecode +: (xLen > 32).option(new A64Decode).toSeq else Nil) ++:
@@ -109,6 +116,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
       (if (minFLen == 16) new HDecode +: (xLen > 32).option(new H64Decode).toSeq ++: (fLen >= 64).option(new HDDecode).toSeq else Nil) ++:
       (usingRoCC.option(new RoCCDecode)) ++:
       (if (xLen == 32) new I32Decode else new I64Decode) +:
+      (usingBitManip.option(new BitmanipDecode)) ++:
       (usingVM.option(new SVMDecode)) ++:
       (usingSupervisor.option(new SDecode)) ++:
       (usingDebug.option(new DebugDecode)) ++:
@@ -123,8 +131,9 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
       fp_decoder.io.sigs
     }
 
-    l.bits.ctrl.decode(r.bits.inst, decode_table)
+    l.bits.ctrl.decode(r.bits.inst, decode_table) //sets fields of  lr(left-right)
     l.bits.fp_ctrl := fp_decode(r.bits.inst)
+    l.bits.is_bitmanip := is_bitmanip
   }
 
   for (i <- 0 until retireWidth) {
@@ -300,7 +309,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
 
     val rrd_fence_stall = ((uop.system_insn || ctrl.fence || ctrl.amo || ctrl.fence_i) &&
       (ex_bsy || mem_bsy || wb_bsy || isboard_bsy || fsboard_bsy || !io.dmem.ordered || io.rocc.busy))
-    val is_pipe0 = uop.csr_en || uop.sfence || uop.system_insn || ctrl.fence || ctrl.csr =/= CSR.N || uop.xcpt || uop.uses_fp || ctrl.mul || ctrl.div
+    val is_pipe0 = uop.csr_en || uop.sfence || uop.system_insn || ctrl.fence || ctrl.csr =/= CSR.N || uop.xcpt || uop.uses_fp || ctrl.mul || ctrl.div || uop.is_bitmanip
 
     rrd_stall(i) := rrd_uops(i).valid && (
       rrd_stall_data(i) ||
@@ -451,6 +460,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
 
   val mulDivParams = tileParams.core.asInstanceOf[SaturnCoreParams].mulDiv.get
   require(mulDivParams.mulUnroll == 0)
+
   val mul = Module(new PipelinedMultiplier(64, 2))
   mul.io.req.valid := ex_uops_reg(0).valid && ex_uops_reg(0).bits.ctrl.mul && ex_fire(0)
   mul.io.req.bits.dw := ex_uops_reg(0).bits.ctrl.alu_dw
@@ -458,6 +468,17 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   mul.io.req.bits.in1 := ex_uops_reg(0).bits.rs1_data
   mul.io.req.bits.in2 := ex_uops_reg(0).bits.rs2_data
   mul.io.req.bits.tag := ex_uops_reg(0).bits.rd
+
+
+  val bitmanip = Module(new Bitmanip())
+  val imm_bitmanip = ImmGen(ex_uops_reg(0).bits.ctrl.sel_imm, ex_uops_reg(0).bits.inst)
+  bitmanip.io.req.valid := ex_uops_reg(0).valid && ex_uops_reg(0).bits.is_bitmanip && ex_fire(0) && usingBitManip.B
+  bitmanip.io.req.bits.dw := ex_uops_reg(0).bits.ctrl.alu_dw
+  bitmanip.io.req.bits.fn := Cat(ex_uops_reg(0).bits.ctrl.alu_fn, ex_uops_reg(0).bits.ctrl.mem_cmd(0))
+  bitmanip.io.req.bits.in1 := ex_uops_reg(0).bits.rs1_data
+  bitmanip.io.req.bits.in2 := Mux(ex_uops_reg(0).bits.ctrl.rxs2 === 1.U,
+    ex_uops_reg(0).bits.rs2_data.asUInt, imm_bitmanip.asUInt)
+
 
   val ex_dmem_oh = ex_uops_reg.map({u => u.valid && u.bits.ctrl.mem})
   val ex_dmem_uop = Mux1H(ex_dmem_oh, ex_uops_reg)
@@ -770,6 +791,13 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     wb_uops(0).bits.wdata.bits := mul.io.resp.bits.data
   }
 
+  if (usingBitManip) {
+    when (wb_uops_reg(0).bits.is_bitmanip) {
+      wb_uops(0).bits.wdata.valid := true.B
+      wb_uops(0).bits.wdata.bits := bitmanip.io.resp.bits
+    }
+  }
+
   val wb_rocc_oh = wb_uops_reg.map({u => u.valid && u.bits.ctrl.rocc})
   val wb_rocc_fire = (wb_rocc_oh zip wb_fire).map({case (h,f) => h && f}).reduce(_||_)
   val wb_rocc_uop = Mux1H(wb_rocc_oh, wb_uops_reg)
@@ -882,7 +910,6 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     wb_bypasses(i).can_bypass := wb_uops(i).bits.wdata.valid
     wb_bypasses(i).data := wb_uops(i).bits.wdata.bits
 
-
     when (wb_fire(i) && !wb_uops(i).bits.xcpt && !wb_uops(i).bits.needs_replay) {
       val wfd = wb_uops(i).bits.ctrl.wfd
       val wxd = wb_uops(i).bits.ctrl.wxd
@@ -911,6 +938,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
       printf("\n")
     }
   }
+
 
   when (wb_fp_fire && wb_fp_uop.bits.fp_ctrl.toint && !wb_fp_uop.bits.xcpt) {
     csr.io.fcsr_flags.valid := true.B
@@ -1001,7 +1029,8 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     val waddr = UInt(5.W)
     val wdata = UInt(64.W)
   }
-  // dmem,div,rocc
+
+  // dmem, div, rocc
   val ll_arb = Module(new Arbiter(new LLWB, 3))
   ll_arb.io.out.ready := true.B
 

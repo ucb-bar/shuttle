@@ -8,7 +8,6 @@ import freechips.rocketchip.tile._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.util._
 
-
 class SaturnUOP(implicit p: Parameters) extends CoreBundle {
   val nRAS = tileParams.btb.get.nRAS
   val inst = UInt(32.W)
@@ -18,6 +17,7 @@ class SaturnUOP(implicit p: Parameters) extends CoreBundle {
   val ctrl = new IntCtrlSigs
   val fp_ctrl = new FPUCtrlSigs
   val rvc = Bool()
+  val is_bitmanip = Bool()
 
   val btb_resp = Valid(new BTBResp)
   val next_pc = Valid(UInt(vaddrBitsExtended.W))
@@ -70,7 +70,7 @@ class SaturnUOP(implicit p: Parameters) extends CoreBundle {
   def cfi = ctrl.branch || ctrl.jal || ctrl.jalr
 
   def uses_brjmp = cfi || sfence
-  def uses_alu = ctrl.wxd && !ctrl.mem && !ctrl.div && !ctrl.mul && !csr_en && !ctrl.fp && !ctrl.rocc && !ctrl.jalr
+  def uses_alu = ctrl.wxd && !ctrl.mem && !ctrl.div && !ctrl.mul && !csr_en && !ctrl.fp && !ctrl.rocc && !ctrl.jalr && !is_bitmanip
   def uses_fp = ctrl.fp && !fp_ctrl.fromint && !(fp_ctrl.ldst && fp_ctrl.wen)
   def uses_ifpu = ctrl.fp && fp_ctrl.fromint
 }
