@@ -889,7 +889,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     }
   }
 
-
+  val usePipelinePrints = PlusArg("saturn_pipe_prints", width=1, default=0)(0)
   for (i <- 0 until retireWidth) {
     val waddr = WireInit(wb_uops(i).bits.rd)
     val wdata = WireInit(wb_uops(i).bits.wdata.bits)
@@ -910,33 +910,43 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     wb_bypasses(i).can_bypass := wb_uops(i).bits.wdata.valid
     wb_bypasses(i).data := wb_uops(i).bits.wdata.bits
 
-    when (wb_fire(i) && !wb_uops(i).bits.xcpt && !wb_uops(i).bits.needs_replay) {
+    val com = wb_fire(i) && !wb_uops(i).bits.xcpt && !wb_uops(i).bits.needs_replay
+    when (com || usePipelinePrints) {
       val wfd = wb_uops(i).bits.ctrl.wfd
       val wxd = wb_uops(i).bits.ctrl.wxd
 
-      printf("%d 0x%x ",
-        csr.io.status.prv,
-        Sext(wb_uops(i).bits.pc, 64))
-      when (wb_uops(i).bits.rvc) {
-        printf("(0x%x)", wb_uops(i).bits.raw_inst(15,0))
+      when (com) {
+        printf("%d 0x%x ",
+          csr.io.status.prv,
+          Sext(wb_uops(i).bits.pc, 64))
       } .otherwise {
-        printf("(0x%x)", wb_uops(i).bits.raw_inst)
+        printf("____________________ ")
       }
-      when (wxd && wb_uops(i).bits.rd =/= 0.U && wb_uops(i).bits.wdata.valid) {
-        printf(" x%d 0x%x",
-          wb_uops(i).bits.rd,
-          wb_uops(i).bits.wdata.bits)
-      } .elsewhen (wxd && wb_uops(i).bits.rd =/= 0.U && !wb_uops(i).bits.wdata.valid) {
-        printf(" x%d p%d 0xXXXXXXXXXXXXXXXX",
-          wb_uops(i).bits.rd,
-          wb_uops(i).bits.rd)
-      } .elsewhen (wfd) {
-        printf(" f%d p%d 0xXXXXXXXXXXXXXXXX",
-          wb_uops(i).bits.rd,
-          wb_uops(i).bits.rd + 32.U)
+      when (!usePipelinePrints) {
+        when (wb_uops(i).bits.rvc) {
+          printf("(0x%x)", wb_uops(i).bits.raw_inst(15,0))
+        } .otherwise {
+          printf("(0x%x)", wb_uops(i).bits.raw_inst)
+        }
+        when (wxd && wb_uops(i).bits.rd =/= 0.U && wb_uops(i).bits.wdata.valid) {
+          printf(" x%d 0x%x",
+            wb_uops(i).bits.rd,
+            wb_uops(i).bits.wdata.bits)
+        } .elsewhen (wxd && wb_uops(i).bits.rd =/= 0.U && !wb_uops(i).bits.wdata.valid) {
+          printf(" x%d p%d 0xXXXXXXXXXXXXXXXX",
+            wb_uops(i).bits.rd,
+            wb_uops(i).bits.rd)
+        } .elsewhen (wfd) {
+          printf(" f%d p%d 0xXXXXXXXXXXXXXXXX",
+            wb_uops(i).bits.rd,
+            wb_uops(i).bits.rd + 32.U)
+        }
+        printf("\n")
       }
-      printf("\n")
     }
+  }
+  when (usePipelinePrints) {
+    printf("\n")
   }
 
 
