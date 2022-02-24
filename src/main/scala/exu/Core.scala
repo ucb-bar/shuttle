@@ -647,6 +647,9 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   for (i <- 0 until retireWidth) {
     val uop = mem_uops_reg(i).bits
     val ctrl = uop.ctrl
+    when (mem_uops(i).valid && mem_uops_reg(i).bits.ctrl.jalr && csr.io.status.debug) {
+      io.imem.flush_icache := true.B
+    }
     when (mem_brjmp_oh(i) && mem_uops_reg(i).bits.ctrl.jalr) {
       mem_uops(i).bits.wdata.valid := true.B
       mem_uops(i).bits.wdata.bits := mem_brjmp_target.asUInt
