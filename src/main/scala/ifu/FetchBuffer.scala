@@ -14,7 +14,7 @@ import saturn.util._
 class SaturnFetchBuffer(implicit p: Parameters) extends CoreModule
 {
 
-  val numEntries = fetchWidth
+  val numEntries = retireWidth * 3
   val io = IO(new Bundle {
     val enq = Flipped(Decoupled(new SaturnFetchBundle))
     val deq = Vec(retireWidth, Decoupled(new SaturnUOP))
