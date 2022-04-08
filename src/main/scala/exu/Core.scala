@@ -82,13 +82,12 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   assert(PopCount(flush_rrd).isOneOf(0.U, retireWidth.U))
   val flush_ex = WireInit(VecInit(Seq.fill(retireWidth) { false.B }))
   assert(PopCount(flush_ex).isOneOf(0.U, retireWidth.U))
-  val flush_mem = WireInit(VecInit(Seq.fill(retireWidth) { false.B }))
+  val kill_mem = WireInit(false.B)
   val kill_wb = WireInit(VecInit(Seq.fill(retireWidth) { false.B }))
   assert(!kill_wb(0))
 
   val rrd_fire = (rrd_uops zip rrd_stall) map { case (u, s) => u.valid && !s }
   val ex_fire = (ex_uops_reg zip ex_stall) map { case (u, s) => u.valid && !s }
-  val mem_fire = (mem_uops_reg) map { case (u) => u.valid }
 
   val ex_bsy = ex_uops_reg.map(_.valid).reduce(_||_)
   val mem_bsy = mem_uops_reg.map(_.valid).reduce(_||_)
@@ -548,29 +547,17 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     when (ex_uops(i).valid && ex_uops(i).bits.ctrl.wxd && flush_ex(i)) {
       isboard_ex_set(ex_uops(i).bits.rd) := true.B
     }
-    when (ex_fire(i)) {
-      mem_uops_reg(i) := ex_uops(i)
-      mem_uops_reg(i).valid := ex_uops(i).valid && !flush_ex(i)
-      when (ex_uops(i).valid && ex_uops(i).bits.ctrl.wfd && !flush_ex(i)) {
-        fsboard_ex_clear(ex_uops(i).bits.rd) := true.B
-      }
-
-    } .elsewhen (mem_fire(i) || flush_mem(i)) {
-      mem_uops_reg(i).valid := false.B
+    mem_uops_reg(i) := ex_uops(i)
+    mem_uops_reg(i).valid := ex_uops(i).valid && !flush_ex(i) && ex_fire(i)
+    when (ex_fire(i) && ex_uops(i).bits.ctrl.wfd && !flush_ex(i)) {
+      fsboard_ex_clear(ex_uops(i).bits.rd) := true.B
     }
   }
 
 
   //mem
-  val mem_fp_fire = mem_fire(0) && mem_uops_reg(0).valid && mem_uops_reg(0).bits.uses_fp
-  val mem_fp_flush = flush_mem(0) && mem_uops_reg(0).valid && mem_uops_reg(0).bits.uses_fp
-  fpus.foreach(_.io.firem := mem_fp_fire)
-  fpus.foreach(_.io.killm := mem_fp_flush)
-  val mem_ifpu_oh = mem_uops_reg.map({u => u.valid && u.bits.uses_ifpu})
-  val mem_ifpu_fire = (mem_ifpu_oh zip mem_fire).map({case (h,f) => h && f }).reduce(_||_)
-  val mem_ifpu_flush = (mem_ifpu_oh zip flush_mem).map({case (h,f) => h && f }).reduce(_||_)
-  ifpu.io.firem := mem_ifpu_fire
-  ifpu.io.killm := mem_ifpu_flush
+  fpus.foreach(_.io.killm := kill_mem)
+  ifpu.io.killm := kill_mem
 
   val mem_brjmp_oh = mem_uops_reg.map({u => u.valid && (u.bits.uses_brjmp || u.bits.next_pc.valid)})
   val mem_brjmp_val = mem_brjmp_oh.reduce(_||_)
@@ -698,32 +685,27 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
 
 
   for (i <- 0 until retireWidth) {
-    when (RegNext(mem_uops(i).valid && mem_uops(i).bits.ctrl.mem && (!mem_fire(i) || flush_mem(i)))) {
-      mem_uops(i).bits.needs_replay := true.B
+    when (RegNext(mem_uops(i).valid && mem_uops(i).bits.ctrl.mem && kill_mem)) {
       io.dmem.s2_kill := true.B
     }
   }
 
   for (i <- 0 until retireWidth) {
-    when (mem_uops(i).valid && mem_uops(i).bits.ctrl.wxd && flush_mem(i)) {
+    when (mem_uops(i).valid && mem_uops(i).bits.ctrl.wxd && kill_mem) {
       isboard_mem_set(mem_uops(i).bits.rd) := true.B
     }
-    when (mem_uops(i).valid && mem_uops(i).bits.ctrl.wfd && flush_mem(i)) {
+    when (mem_uops(i).valid && mem_uops(i).bits.ctrl.wfd && kill_mem) {
       fsboard_mem_set(mem_uops(i).bits.rd) := true.B
     }
 
     wb_uops_reg(i) := mem_uops(i)
-    wb_uops_reg(i).valid := mem_fire(i) && mem_uops(i).valid && !flush_mem(i)
+    wb_uops_reg(i).valid := mem_uops_reg(i).valid && !kill_mem
   }
 
   //wb
   val wb_fp_uop = wb_uops_reg(0)
   val wb_fp_ctrl = wb_fp_uop.bits.fp_ctrl
   val wb_fp_divsqrt = wb_uops_reg(0).valid && wb_fp_uop.bits.uses_fp && (wb_fp_ctrl.div || wb_fp_ctrl.sqrt)
-  fpus.foreach(_.io.firew := true.B)
-  fpus.foreach(_.io.killw := false.B)
-  ifpu.io.firew := true.B
-  ifpu.io.killw := false.B
 
   val divSqrt_val = RegInit(false.B)
   val divSqrt_waddr = Reg(UInt(5.W))
@@ -963,7 +945,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
 
   when (wb_uops_reg(0).valid && ((wb_uops(0).bits.csr_wen && !wb_uops(0).bits.needs_replay) ||
                                   wb_uops(0).bits.flush_pipe)) {
-    flush_mem .foreach(_ := true.B)
+    kill_mem := true.B
     flush_ex.foreach(_ := true.B)
     flush_rrd .foreach(_ := true.B)
     for (i <- 1 until retireWidth) { kill_wb(i) := true.B }
@@ -975,7 +957,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   }
 
   when (wb_uops_reg(0).valid && (wb_uops(0).bits.xcpt || csr.io.eret) && !wb_uops(0).bits.needs_replay) {
-    flush_mem .foreach(_ := true.B)
+    kill_mem := true.B
     flush_ex.foreach(_ := true.B)
     flush_rrd .foreach(_ := true.B)
     for (i <- 1 until retireWidth) { kill_wb(i) := true.B }
@@ -987,7 +969,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   }
 
   when (replays.reduce(_||_)) {
-    flush_mem .foreach(_ := true.B)
+    kill_mem := true.B
     flush_ex.foreach(_ := true.B)
     flush_rrd .foreach(_ := true.B)
     (Seq(ifpu) ++ fpus).foreach(_.io.in.valid := false.B)

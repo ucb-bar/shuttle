@@ -50,10 +50,7 @@ abstract class SaturnFPUPipe(val latency: Int)
     val in_rd = Input(UInt(5.W))
     val in_out_tag = Input(UInt(2.W))
     val in_lt = Input(Bool())
-    val firem = Input(Bool())
-    val firew = Input(Bool())
     val killm = Input(Bool())
-    val killw = Input(Bool())
     val out = Decoupled(new FPResult)
     val out_rd = Output(UInt(5.W))
     val out_tag = Output(UInt(2.W))
@@ -63,7 +60,6 @@ abstract class SaturnFPUPipe(val latency: Int)
 
   class Tracker extends Bundle {
     val in_mem = Bool()
-    val in_wb = Bool()
     val killed = Bool()
     val rd = UInt(5.W)
     val result = Valid(new FPResult)
@@ -75,7 +71,6 @@ abstract class SaturnFPUPipe(val latency: Int)
     enq_idx := Mux(enq_idx === (latency+1).U, 0.U, enq_idx + 1.U)
     trackers(enq_idx).valid := true.B
     trackers(enq_idx).bits.in_mem := true.B
-    trackers(enq_idx).bits.in_wb := false.B
     trackers(enq_idx).bits.killed := false.B
     trackers(enq_idx).bits.rd := io.in_rd
     trackers(enq_idx).bits.result.valid := false.B
@@ -87,14 +82,10 @@ abstract class SaturnFPUPipe(val latency: Int)
 
   for (tracker <- trackers) {
     when (tracker.valid) {
-      when (tracker.bits.in_mem && io.firem) {
+      when (tracker.bits.in_mem) {
         tracker.bits.in_mem := false.B
-        tracker.bits.in_wb := true.B
       }
-      when (tracker.bits.in_wb && io.firew) {
-        tracker.bits.in_wb := false.B
-      }
-      when ((tracker.bits.in_mem && io.killm) || (tracker.bits.in_wb && io.killw)) {
+      when (tracker.bits.in_mem && io.killm) {
         tracker.bits.killed := true.B
       }
     }
