@@ -83,12 +83,12 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   val flush_ex = WireInit(VecInit(Seq.fill(retireWidth) { false.B }))
   assert(PopCount(flush_ex).isOneOf(0.U, retireWidth.U))
   val flush_mem = WireInit(VecInit(Seq.fill(retireWidth) { false.B }))
-  val flush_wb = WireInit(VecInit(Seq.fill(retireWidth) { false.B }))
+  val kill_wb = WireInit(VecInit(Seq.fill(retireWidth) { false.B }))
+  assert(!kill_wb(0))
 
   val rrd_fire = (rrd_uops zip rrd_stall) map { case (u, s) => u.valid && !s }
   val ex_fire = (ex_uops_reg zip ex_stall) map { case (u, s) => u.valid && !s }
   val mem_fire = (mem_uops_reg) map { case (u) => u.valid }
-  val wb_fire = (wb_uops_reg zip flush_wb) map { case (u, f) => u.valid && !f}
 
   val ex_bsy = ex_uops_reg.map(_.valid).reduce(_||_)
   val mem_bsy = mem_uops_reg.map(_.valid).reduce(_||_)
@@ -296,39 +296,32 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   }
 
   val fsboard_bsy = Wire(Bool())
-  var stall_younger = false.B
-  var rrd_older_stalled = false.B
-  var rrd_found_ifpu = false.B
+  var stall_due_to_older = false.B
   var rrd_found_mem = false.B
-  var rrd_found_rocc = false.B
-  var rrd_found_xcpt = false.B
-  var rrd_found_csr = false.B
   for (i <- 0 until retireWidth) {
     val uop = rrd_uops(i).bits
     val ctrl = uop.ctrl
 
-    val rrd_fence_stall = ((uop.system_insn || ctrl.fence || ctrl.amo || ctrl.fence_i) &&
+    val rrd_fence_stall = (i == 0).B && ((uop.system_insn || ctrl.fence || ctrl.amo || ctrl.fence_i) &&
       (ex_bsy || mem_bsy || wb_bsy || isboard_bsy || fsboard_bsy || !io.dmem.ordered || io.rocc.busy))
-    val is_pipe0 = uop.csr_en || uop.sfence || uop.system_insn || ctrl.fence || ctrl.csr =/= CSR.N || uop.xcpt || uop.uses_fp || ctrl.mul || ctrl.div || uop.is_bitmanip
+    val rrd_rocc_stall = (i == 0).B && ctrl.rocc && !io.rocc.cmd.ready
+    val is_pipe0 = uop.system_insn || ctrl.fence || ctrl.amo || ctrl.fence_i || uop.csr_en || uop.sfence || ctrl.csr =/= CSR.N || uop.xcpt || uop.uses_fp || ctrl.mul || ctrl.div || uop.is_bitmanip || ctrl.rocc || uop.uses_ifpu
+    val is_youngest = uop.uses_brjmp || uop.next_pc.valid || uop.xcpt || uop.csr_en
 
-    rrd_stall(i) := rrd_uops(i).valid && (
-      rrd_stall_data(i) ||
-      (is_pipe0 && (i != 0).B) ||
-      (uop.uses_ifpu && rrd_found_ifpu) ||
-      (ctrl.mem && rrd_found_mem) ||
-      (ctrl.rocc && rrd_found_rocc) ||
-      (ctrl.rocc && !io.rocc.cmd.ready) ||
-      rrd_fence_stall ||
-      rrd_found_csr ||
-      rrd_found_xcpt
-    ) || rrd_older_stalled || csr.io.csr_stall || ex_stall.reduce(_||_)
-    stall_younger = stall_younger || (uop.uses_brjmp || uop.next_pc.valid)
-    rrd_older_stalled = rrd_older_stalled || rrd_stall(i) || stall_younger
-    rrd_found_ifpu = rrd_found_ifpu || uop.uses_ifpu
+
+    rrd_stall(i) := (
+      (rrd_uops(i).valid && rrd_stall_data(i)) ||
+      (rrd_fence_stall)                        ||
+      (rrd_rocc_stall)                         ||
+      (is_pipe0 && (i != 0).B)                 ||
+      (rrd_found_mem && ctrl.mem)              ||
+      (stall_due_to_older)                     ||
+      (csr.io.csr_stall)                       ||
+      (ex_stall.reduce(_||_))
+    )
+
+    stall_due_to_older = rrd_stall(i) || is_youngest
     rrd_found_mem = rrd_found_mem || ctrl.mem
-    rrd_found_rocc = rrd_found_rocc || ctrl.rocc
-    rrd_found_xcpt = rrd_found_xcpt || uop.xcpt
-    rrd_found_csr = rrd_found_csr || uop.csr_en
   }
 
   for (i <- 0 until retireWidth) {
@@ -361,8 +354,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     fsboard.foreach(_ := true.B)
   }
 
-  val ex_ifpu_oh = ex_uops_reg.map({u => u.valid && u.bits.uses_ifpu})
-  val ex_ifpu_uop = Mux1H(ex_ifpu_oh, ex_uops_reg)
+  val ex_ifpu_uop = ex_uops_reg(0)
   val ex_ifpu_inst = ex_ifpu_uop.bits.inst
   val ex_fp_val = ex_uops_reg(0).valid && ex_uops_reg(0).bits.uses_fp
   val ex_fp_fire = ex_fp_val && ex_fire(0)
@@ -439,7 +431,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   fpiu.io.in.bits := fuInput(None, ex_fp_ctrl, ex_fp_rm, ex_fp_inst)
 
   val ifpu = Module(new SaturnIntToFP)
-  ifpu.io.in.valid := (ex_ifpu_oh zip ex_fire).map({case (l,r) => l && r}).reduce(_||_) && !ex_ifpu_uop.bits.xcpt
+  ifpu.io.in.valid := ex_ifpu_uop.valid && ex_fire(0) && !ex_ifpu_uop.bits.xcpt && ex_ifpu_uop.bits.uses_ifpu
   ifpu.io.in.bits := fuInput(None, ex_ifpu_uop.bits.fp_ctrl,
     Mux(ex_ifpu_inst(14,12) === 7.U, io.fcsr_rm, ex_ifpu_inst(14,12)), ex_ifpu_inst)
   ifpu.io.in.bits.in1 := ex_ifpu_uop.bits.rs1_data
@@ -719,24 +711,18 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     when (mem_uops(i).valid && mem_uops(i).bits.ctrl.wfd && flush_mem(i)) {
       fsboard_mem_set(mem_uops(i).bits.rd) := true.B
     }
-    when (mem_fire(i)) {
-      wb_uops_reg(i) := mem_uops(i)
-      wb_uops_reg(i).valid := mem_uops(i).valid && !flush_mem(i)
-    } .elsewhen (wb_fire(i) || flush_wb(i)) {
-      wb_uops_reg(i).valid := false.B
-    }
+
+    wb_uops_reg(i) := mem_uops(i)
+    wb_uops_reg(i).valid := mem_fire(i) && mem_uops(i).valid && !flush_mem(i)
   }
 
   //wb
-  val wb_fp_fire = wb_uops_reg(0).valid && wb_uops_reg(0).bits.uses_fp && wb_fire(0)
   val wb_fp_uop = wb_uops_reg(0)
   val wb_fp_ctrl = wb_fp_uop.bits.fp_ctrl
   val wb_fp_divsqrt = wb_uops_reg(0).valid && wb_fp_uop.bits.uses_fp && (wb_fp_ctrl.div || wb_fp_ctrl.sqrt)
-  fpus.foreach(_.io.firew := wb_fp_fire)
+  fpus.foreach(_.io.firew := true.B)
   fpus.foreach(_.io.killw := false.B)
-  val wb_ifpu_oh = wb_uops_reg.map({u => u.valid && u.bits.uses_ifpu})
-  val wb_ifpu_fire = (wb_ifpu_oh zip wb_fire).map({case (h,f) => h && f}).reduce(_||_)
-  ifpu.io.firew := wb_ifpu_fire
+  ifpu.io.firew := true.B
   ifpu.io.killw := false.B
 
   val divSqrt_val = RegInit(false.B)
@@ -750,7 +736,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   for (t <- floatTypes) {
     val tag = wb_fp_uop.bits.fp_ctrl.typeTagOut
     val divSqrt = Module(new hardfloat.DivSqrtRecFN_small(t.exp, t.sig, 0))
-    divSqrt.io.inValid := wb_fp_fire && tag === typeTag(t).U && wb_fp_divsqrt
+    divSqrt.io.inValid := wb_uops_reg(0).valid && tag === typeTag(t).U && wb_fp_divsqrt
     divSqrt.io.sqrtOp := wb_fp_ctrl.sqrt
     divSqrt.io.a := maxType.unsafeConvert(wb_fp_uop.bits.fdivin.in1, t)
     divSqrt.io.b := maxType.unsafeConvert(wb_fp_uop.bits.fdivin.in2, t)
@@ -774,7 +760,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
 
   val div = Module(new MulDiv(mulDivParams, width=64))
   div.io.kill := false.B
-  div.io.req.valid := wb_uops_reg(0).valid && wb_uops_reg(0).bits.ctrl.div && wb_fire(0)
+  div.io.req.valid := wb_uops_reg(0).valid && wb_uops_reg(0).bits.ctrl.div
   div.io.req.bits.dw := wb_uops_reg(0).bits.ctrl.alu_dw
   div.io.req.bits.fn := wb_uops_reg(0).bits.ctrl.alu_fn
   div.io.req.bits.in1 := wb_uops_reg(0).bits.rs1_data
@@ -797,13 +783,12 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     }
   }
 
-  val wb_rocc_oh = wb_uops_reg.map({u => u.valid && u.bits.ctrl.rocc})
-  val wb_rocc_fire = (wb_rocc_oh zip wb_fire).map({case (h,f) => h && f}).reduce(_||_)
-  val wb_rocc_uop = Mux1H(wb_rocc_oh, wb_uops_reg)
+  val wb_rocc_valid = wb_uops_reg(0).valid && wb_uops_reg(0).bits.ctrl.rocc
+  val wb_rocc_uop = wb_uops_reg(0)
   io.rocc.cmd.valid := false.B
   io.rocc.cmd.bits := DontCare
   if (usingRoCC) {
-    io.rocc.cmd.valid := wb_rocc_fire
+    io.rocc.cmd.valid := wb_rocc_valid
     io.rocc.cmd.bits.status := csr.io.status
     io.rocc.cmd.bits.inst := wb_rocc_uop.bits.inst.asTypeOf(new RoCCInstruction)
     io.rocc.cmd.bits.rs1 := wb_rocc_uop.bits.rs1_data
@@ -813,9 +798,9 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
 
   val wb_xcpt_uop = wb_uops(0)
   val wb_xcpt_uop_reg = wb_uops_reg(0)
-  csr.io.exception := wb_uops(0).bits.xcpt && !wb_uops(0).bits.needs_replay && wb_fire(0)
+  csr.io.exception := wb_uops_reg(0).valid && !kill_wb(0) && wb_uops(0).bits.xcpt && !wb_uops(0).bits.needs_replay
   csr.io.cause := wb_xcpt_uop.bits.xcpt_cause
-  csr.io.retire := PopCount(wb_fire zip wb_uops map { case (f, u) => f && !u.bits.xcpt && !u.bits.needs_replay })
+  csr.io.retire := PopCount(kill_wb zip wb_uops map { case (k, u) => u.valid && !k && !u.bits.xcpt && !u.bits.needs_replay })
   debug_irt_reg := debug_irt_reg + csr.io.retire
   csr.io.pc := wb_uops_reg(0).bits.pc
   var found_valid = wb_uops_reg(0).valid
@@ -851,7 +836,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     wb_uops(0).bits.wdata.bits := csr.io.rw.rdata
   }
 
-  when (wb_fire(0) && !wb_uops_reg(0).bits.xcpt && !wb_uops_reg(0).bits.needs_replay && wb_uops_reg(0).bits.ctrl.fence_i) {
+  when (wb_uops_reg(0).valid && !wb_uops_reg(0).bits.xcpt && !wb_uops_reg(0).bits.needs_replay && wb_uops_reg(0).bits.ctrl.fence_i) {
     io.imem.flush_icache := true.B
   }
 
@@ -894,7 +879,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     val wdata = WireInit(wb_uops(i).bits.wdata.bits)
     val wsboard = WireInit(!wb_uops(i).bits.uses_alu)
     val wen = Wire(Bool())
-    wen := (wb_fire(i) && wb_uops(i).bits.ctrl.wxd && !wb_uops(i).bits.xcpt &&
+    wen := (wb_uops(i).valid && !kill_wb(i) && wb_uops(i).bits.ctrl.wxd && !wb_uops(i).bits.xcpt &&
       !wb_uops(i).bits.needs_replay && wb_uops(i).bits.wdata.valid)
 
     when (wen) {
@@ -909,7 +894,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     wb_bypasses(i).can_bypass := wb_uops(i).bits.wdata.valid
     wb_bypasses(i).data := wb_uops(i).bits.wdata.bits
 
-    val com = wb_fire(i) && !wb_uops(i).bits.xcpt && !wb_uops(i).bits.needs_replay
+    val com = wb_uops(i).valid && !kill_wb(i) && !wb_uops(i).bits.xcpt && !wb_uops(i).bits.needs_replay
     when (com || usePipelinePrints) {
       val wfd = wb_uops(i).bits.ctrl.wfd
       val wxd = wb_uops(i).bits.ctrl.wxd
@@ -949,7 +934,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   }
 
 
-  when (wb_fp_fire && wb_fp_uop.bits.fp_ctrl.toint && !wb_fp_uop.bits.xcpt) {
+  when (wb_uops_reg(0).valid && wb_uops_reg(0).bits.uses_fp && wb_fp_uop.bits.fp_ctrl.toint && !wb_fp_uop.bits.xcpt) {
     csr.io.fcsr_flags.valid := true.B
     csr_fcsr_flags(0) := wb_fp_uop.bits.fexc
   }
@@ -958,7 +943,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   io.ptw.sfence := io.imem.sfence
 
 
-  when (wb_fire(0) && wb_uops(0).bits.sfence && !wb_uops(0).bits.xcpt && !wb_uops(0).bits.needs_replay) {
+  when (wb_uops(0).valid && wb_uops(0).bits.sfence && !wb_uops(0).bits.xcpt && !wb_uops(0).bits.needs_replay) {
     io.imem.sfence.valid := true.B
     io.imem.sfence.bits.rs1 := wb_uops(0).bits.mem_size(0)
     io.imem.sfence.bits.rs2 := wb_uops(0).bits.mem_size(1)
@@ -981,8 +966,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     flush_mem .foreach(_ := true.B)
     flush_ex.foreach(_ := true.B)
     flush_rrd .foreach(_ := true.B)
-    for (i <- 1 until retireWidth) { flush_wb(i) := true.B }
-    (Seq(ifpu) ++ fpus).foreach(_.io.killw := true.B)
+    for (i <- 1 until retireWidth) { kill_wb(i) := true.B }
     (Seq(ifpu) ++ fpus).foreach(_.io.in.valid := false.B)
     io.imem.redirect_val := true.B
     io.imem.redirect_flush := true.B
@@ -994,9 +978,8 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     flush_mem .foreach(_ := true.B)
     flush_ex.foreach(_ := true.B)
     flush_rrd .foreach(_ := true.B)
-    for (i <- 1 until retireWidth) { flush_wb(i) := true.B }
-      (Seq(ifpu) ++ fpus).foreach(_.io.killw := true.B)
-      (Seq(ifpu) ++ fpus).foreach(_.io.in.valid := false.B)
+    for (i <- 1 until retireWidth) { kill_wb(i) := true.B }
+    (Seq(ifpu) ++ fpus).foreach(_.io.in.valid := false.B)
     io.imem.redirect_val := true.B
     io.imem.redirect_flush := true.B
     io.imem.redirect_pc := csr.io.evec
@@ -1012,13 +995,10 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   for (i <- 0 until retireWidth) {
     val killed_by_older_replay = replays.take(i).orR
     when (killed_by_older_replay) {
-      flush_wb(i) := true.B
+      kill_wb(i) := true.B
     }
     when (killed_by_older_replay ||
-      (wb_fire(i) && (wb_uops(i).bits.xcpt || wb_uops(i).bits.needs_replay))) {
-      when (wb_uops(i).valid && (wb_uops(i).bits.uses_ifpu || wb_uops(i).bits.uses_fp)) {
-        (Seq(ifpu) ++ fpus).foreach(_.io.killw := true.B)
-      }
+      (wb_uops_reg(i).valid && !kill_wb(i) && (wb_uops(i).bits.xcpt || wb_uops(i).bits.needs_replay))) {
       when (wb_uops(i).valid && wb_uops(i).bits.ctrl.wxd) {
         isboard_wb_set(wb_uops(i).bits.rd) := true.B
       }
