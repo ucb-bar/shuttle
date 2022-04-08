@@ -296,8 +296,8 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   }
 
   val fsboard_bsy = Wire(Bool())
+  var stall_younger = false.B
   var rrd_older_stalled = false.B
-  var rrd_found_brjmp = false.B
   var rrd_found_ifpu = false.B
   var rrd_found_mem = false.B
   var rrd_found_rocc = false.B
@@ -314,7 +314,6 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     rrd_stall(i) := rrd_uops(i).valid && (
       rrd_stall_data(i) ||
       (is_pipe0 && (i != 0).B) ||
-      ((uop.uses_brjmp || uop.next_pc.valid) && rrd_found_brjmp) ||
       (uop.uses_ifpu && rrd_found_ifpu) ||
       (ctrl.mem && rrd_found_mem) ||
       (ctrl.rocc && rrd_found_rocc) ||
@@ -323,8 +322,8 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
       rrd_found_csr ||
       rrd_found_xcpt
     ) || rrd_older_stalled || csr.io.csr_stall || ex_stall.reduce(_||_)
-    rrd_older_stalled = rrd_older_stalled || rrd_stall(i)
-    rrd_found_brjmp = rrd_found_brjmp || (uop.uses_brjmp || uop.next_pc.valid)
+    stall_younger = stall_younger || (uop.uses_brjmp || uop.next_pc.valid)
+    rrd_older_stalled = rrd_older_stalled || rrd_stall(i) || stall_younger
     rrd_found_ifpu = rrd_found_ifpu || uop.uses_ifpu
     rrd_found_mem = rrd_found_mem || ctrl.mem
     rrd_found_rocc = rrd_found_rocc || ctrl.rocc
@@ -631,12 +630,9 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   io.imem.ras_update.bits.addr := mem_brjmp_uop.wdata.bits
 
   when (mem_brjmp_val && mem_brjmp_mispredict) {
-    val valids = MaskLower(VecInit(mem_brjmp_oh).asUInt)
     flush_rrd .foreach(_ := true.B)
     flush_ex.foreach(_ := true.B)
     (Seq(ifpu) ++ fpus).foreach(_.io.in.valid := false.B)
-    for (i <- 0 until retireWidth)
-      when (!valids(i)) { flush_mem(i) := true.B }
     io.imem.redirect_val := true.B
     io.imem.redirect_flush := true.B
     io.imem.redirect_pc := mem_brjmp_npc
