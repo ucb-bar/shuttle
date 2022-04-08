@@ -59,7 +59,7 @@ abstract class SaturnFPUPipe(val latency: Int)
     val out_tag = Output(UInt(2.W))
   }
 
-  val enq_idx = RegInit(0.U(log2Ceil(latency+1).W))
+  val enq_idx = RegInit(0.U(log2Ceil(latency+2).W))
 
   class Tracker extends Bundle {
     val in_mem = Bool()
@@ -70,9 +70,9 @@ abstract class SaturnFPUPipe(val latency: Int)
     val out_tag = UInt(2.W)
   }
 
-  val trackers = Reg(Vec(latency+1, Valid(new Tracker)))
+  val trackers = Reg(Vec(latency+2, Valid(new Tracker)))
   when (io.in.valid) {
-    enq_idx := Mux(enq_idx === latency.U, 0.U, enq_idx + 1.U)
+    enq_idx := Mux(enq_idx === (latency+1).U, 0.U, enq_idx + 1.U)
     trackers(enq_idx).valid := true.B
     trackers(enq_idx).bits.in_mem := true.B
     trackers(enq_idx).bits.in_wb := false.B
@@ -101,7 +101,7 @@ abstract class SaturnFPUPipe(val latency: Int)
   }
 
 
-  val deq_idx = RegInit(0.U(log2Ceil(latency+1).W))
+  val deq_idx = RegInit(0.U(log2Ceil(latency+2).W))
   io.out.valid := false.B
   io.out_rd := trackers(deq_idx).bits.rd
   io.out_tag := trackers(deq_idx).bits.out_tag
@@ -109,7 +109,7 @@ abstract class SaturnFPUPipe(val latency: Int)
   when (trackers(deq_idx).valid) {
     io.out.valid := !trackers(deq_idx).bits.killed && trackers(deq_idx).bits.result.valid
     when ((io.out.ready && io.out.valid) || (!io.out.valid && trackers(deq_idx).bits.killed)) {
-      deq_idx := Mux(deq_idx === latency.U, 0.U, deq_idx + 1.U)
+      deq_idx := Mux(deq_idx === (latency+1).U, 0.U, deq_idx + 1.U)
       trackers(deq_idx).valid := false.B
     }
   }
