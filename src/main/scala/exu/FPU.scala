@@ -10,8 +10,8 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.util.property._
 import freechips.rocketchip.tile._
 
-class SaturnFPUFMAPipe(latency: Int)(implicit p: Parameters)
-    extends SaturnFPUPipe(latency)(p) {
+class SaturnFPUFMAPipe(implicit p: Parameters)
+    extends SaturnFPUPipe()(p) {
 
   val dfma = Module(new FPUFMAPipe(latency, FType.D))
   val sfma = Module(new FPUFMAPipe(latency, FType.S))
@@ -24,16 +24,16 @@ class SaturnFPUFMAPipe(latency: Int)(implicit p: Parameters)
   }
 }
 
-class SaturnIntToFP(implicit p: Parameters) extends SaturnFPUPipe(2)(p) {
-  val ifpu = Module(new IntToFP(2))
+class SaturnIntToFP(implicit p: Parameters) extends SaturnFPUPipe()(p) {
+  val ifpu = Module(new IntToFP(latency))
   ifpu.io.in := io.in
   when (ifpu.io.out.valid) {
     trackers(out_idx).bits.result := ifpu.io.out
   }
 }
 
-class SaturnFPToFP(implicit p: Parameters) extends SaturnFPUPipe(2)(p) {
-  val fpmu = Module(new FPToFP(2))
+class SaturnFPToFP(implicit p: Parameters) extends SaturnFPUPipe()(p) {
+  val fpmu = Module(new FPToFP(latency))
   fpmu.io.lt := io.in_lt
   fpmu.io.in := io.in
 
@@ -42,8 +42,9 @@ class SaturnFPToFP(implicit p: Parameters) extends SaturnFPUPipe(2)(p) {
   }
 }
 
-abstract class SaturnFPUPipe(val latency: Int)
-  (implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetimed {
+abstract class SaturnFPUPipe()(implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetimed {
+  // Pad everything out to dfma latency to even out scheduling
+  val latency = tileParams.core.fpu.get.dfmaLatency
   val io = new Bundle {
     val ready = Output(Bool())
     val in = Flipped(Valid(new FPInput))
