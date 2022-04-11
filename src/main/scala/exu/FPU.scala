@@ -25,6 +25,7 @@ class SaturnFPPipe(implicit p: Parameters) extends FPUModule()(p) with ShouldBeR
     val s1_fpiu_toint = Output(UInt(64.W))
     val s1_fpiu_fexc = Output(UInt())
     val s1_fpiu_fdiv = Output(new FPInput)
+    val s2_kill = Input(Bool())
     val out = Valid(new FPResult)
     val out_rd = Output(UInt(5.W))
     val out_tag = Output(UInt(2.W))
@@ -93,7 +94,10 @@ class SaturnFPPipe(implicit p: Parameters) extends FPUModule()(p) with ShouldBeR
   fpmu.io.in.bits := fuInput(None, fp_ctrl, rm, inst)
 
 
-  io.out.valid := ShiftRegister(io.in.valid && !(fp_ctrl.toint || fp_ctrl.div || fp_ctrl.sqrt), latency) && !ShiftRegister(io.s1_kill, latency-1)
+  io.out.valid := (ShiftRegister(io.in.valid && !(fp_ctrl.toint || fp_ctrl.div || fp_ctrl.sqrt), latency)
+    && !ShiftRegister(io.s1_kill, latency-1)
+    && !ShiftRegister(io.s2_kill, latency-2)
+  )
   io.out.bits := Mux1H(Seq(dfma.io.out, sfma.io.out, hfma.io.out, ifpu.io.out, fpmu.io.out).map { o =>
     o.valid -> o.bits
   })

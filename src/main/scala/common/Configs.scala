@@ -108,3 +108,12 @@ class WithSaturnBitmanip extends Config((site, here, up) => {
     case other => other
   }
 })
+
+class WithSaturnFPWidth(w: Int)extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: SaturnTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      core = tp.tileParams.core.copy(fpWidth = w)
+    ))
+    case other => other
+  }
+})
