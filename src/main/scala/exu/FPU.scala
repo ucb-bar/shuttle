@@ -10,100 +10,94 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.util.property._
 import freechips.rocketchip.tile._
 
-class SaturnFPUFMAPipe(implicit p: Parameters)
-    extends SaturnFPUPipe()(p) {
+import saturn.common._
 
-  val dfma = Module(new FPUFMAPipe(latency, FType.D))
-  val sfma = Module(new FPUFMAPipe(latency, FType.S))
-  val hfma = Module(new FPUFMAPipe(latency, FType.H))
-  val fmas = Seq(dfma, sfma, hfma)
-  fmas.foreach(_.io.in := io.in)
-  fmas zip Seq(D, S, H) map { case (f,t) => f.io.in.valid := io.in.valid && io.in.bits.typeTagOut === t }
-  when (fmas.map(_.io.out.valid).reduce(_||_)) {
-    trackers(out_idx).bits.result := Mux1H(fmas.map(_.io.out.valid), fmas.map(_.io.out))
-  }
-}
-
-class SaturnIntToFP(implicit p: Parameters) extends SaturnFPUPipe()(p) {
-  val ifpu = Module(new IntToFP(latency))
-  ifpu.io.in := io.in
-  when (ifpu.io.out.valid) {
-    trackers(out_idx).bits.result := ifpu.io.out
-  }
-}
-
-class SaturnFPToFP(implicit p: Parameters) extends SaturnFPUPipe()(p) {
-  val fpmu = Module(new FPToFP(latency))
-  fpmu.io.lt := io.in_lt
-  fpmu.io.in := io.in
-
-  when (fpmu.io.out.valid) {
-    trackers(out_idx).bits.result := fpmu.io.out
-  }
-}
-
-abstract class SaturnFPUPipe()(implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetimed {
-  // Pad everything out to dfma latency to even out scheduling
+class SaturnFPPipe(implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetimed {
   val latency = tileParams.core.fpu.get.dfmaLatency
   val io = new Bundle {
-    val ready = Output(Bool())
-    val in = Flipped(Valid(new FPInput))
-    val in_rd = Input(UInt(5.W))
-    val in_out_tag = Input(UInt(2.W))
-    val in_lt = Input(Bool())
-    val killm = Input(Bool())
-    val out = Decoupled(new FPResult)
+    val in = Input(Valid(new SaturnUOP))
+    val frs1_data = Input(UInt(65.W))
+    val frs2_data = Input(UInt(65.W))
+    val frs3_data = Input(UInt(65.W))
+    val fcsr_rm = Input(UInt(3.W))
+    val s1_kill = Input(Bool())
+    val s1_store_data = Output(UInt(64.W))
+    val s1_fpiu_toint = Output(UInt(64.W))
+    val s1_fpiu_fexc = Output(UInt())
+    val s1_fpiu_fdiv = Output(new FPInput)
+    val out = Valid(new FPResult)
     val out_rd = Output(UInt(5.W))
     val out_tag = Output(UInt(2.W))
   }
 
-  val enq_idx = RegInit(0.U(log2Ceil(latency+2).W))
-
-  class Tracker extends Bundle {
-    val in_mem = Bool()
-    val killed = Bool()
-    val rd = UInt(5.W)
-    val result = Valid(new FPResult)
-    val out_tag = UInt(2.W)
-  }
-
-  val trackers = Reg(Vec(latency+2, Valid(new Tracker)))
-  when (io.in.valid) {
-    enq_idx := Mux(enq_idx === (latency+1).U, 0.U, enq_idx + 1.U)
-    trackers(enq_idx).valid := true.B
-    trackers(enq_idx).bits.in_mem := true.B
-    trackers(enq_idx).bits.killed := false.B
-    trackers(enq_idx).bits.rd := io.in_rd
-    trackers(enq_idx).bits.result.valid := false.B
-    trackers(enq_idx).bits.out_tag := io.in_out_tag
-  }
-
-  val out_idx = ShiftRegister(enq_idx, latency)
-  io.ready := !trackers(enq_idx).valid
-
-  for (tracker <- trackers) {
-    when (tracker.valid) {
-      when (tracker.bits.in_mem) {
-        tracker.bits.in_mem := false.B
-      }
-      when (tracker.bits.in_mem && io.killm) {
-        tracker.bits.killed := true.B
-      }
-    }
+  def fuInput(minT: Option[FType], ctrl: FPUCtrlSigs, rm: UInt, inst: UInt): FPInput = {
+    val req = Wire(new FPInput)
+    val tag = ctrl.typeTagIn
+    req.ldst := ctrl.ldst
+    req.wen := ctrl.wen
+    req.ren1 := ctrl.ren1
+    req.ren2 := ctrl.ren2
+    req.ren3 := ctrl.ren3
+    req.swap12 := ctrl.swap12
+    req.swap23 := ctrl.swap23
+    req.typeTagIn := ctrl.typeTagIn
+    req.typeTagOut := ctrl.typeTagOut
+    req.fromint := ctrl.fromint
+    req.toint := ctrl.toint
+    req.fastpipe := ctrl.fastpipe
+    req.fma := ctrl.fma
+    req.div := ctrl.div
+    req.sqrt := ctrl.sqrt
+    req.wflags := ctrl.wflags
+    req.rm := rm
+    req.in1 := unbox(io.frs1_data, tag, minT)
+    req.in2 := unbox(io.frs2_data, tag, minT)
+    req.in3 := unbox(io.frs3_data, tag, minT)
+    req.typ := inst(21,20)
+    req.fmt := inst(26,25)
+    req.fmaCmd := inst(3,2) | (!ctrl.ren3 && inst(27))
+    req
   }
 
 
-  val deq_idx = RegInit(0.U(log2Ceil(latency+2).W))
-  io.out.valid := false.B
-  io.out_rd := trackers(deq_idx).bits.rd
-  io.out_tag := trackers(deq_idx).bits.out_tag
-  io.out.bits := trackers(deq_idx).bits.result.bits
-  when (trackers(deq_idx).valid) {
-    io.out.valid := !trackers(deq_idx).bits.killed && trackers(deq_idx).bits.result.valid
-    when ((io.out.ready && io.out.valid) || (!io.out.valid && trackers(deq_idx).bits.killed)) {
-      deq_idx := Mux(deq_idx === (latency+1).U, 0.U, deq_idx + 1.U)
-      trackers(deq_idx).valid := false.B
-    }
+
+  val inst = io.in.bits.inst
+  val fp_ctrl = io.in.bits.fp_ctrl
+  val rm = Mux(inst(14,12) === 7.U, io.fcsr_rm, inst(14,12))
+
+  val fpiu = Module(new FPToInt)
+  fpiu.io.in.valid := io.in.valid && (fp_ctrl.toint || fp_ctrl.div || fp_ctrl.sqrt || (fp_ctrl.fastpipe && fp_ctrl.wflags))
+  fpiu.io.in.bits := fuInput(None, fp_ctrl, rm, inst)
+  io.s1_store_data := fpiu.io.out.bits.store
+  io.s1_fpiu_toint := fpiu.io.out.bits.toint
+  io.s1_fpiu_fexc := fpiu.io.out.bits.exc
+  io.s1_fpiu_fdiv := fpiu.io.out.bits.in
+
+  val dfma = Module(new FPUFMAPipe(latency, FType.D))
+  val sfma = Module(new FPUFMAPipe(latency, FType.S))
+  val hfma = Module(new FPUFMAPipe(latency, FType.H))
+
+  Seq(dfma, sfma, hfma).foreach { fma =>
+    fma.io.in.valid := io.in.valid && fp_ctrl.typeTagOut === typeTagGroup(fma.t) && fp_ctrl.fma
+    fma.io.in.bits := fuInput(Some(fma.t), fp_ctrl, rm, inst)
   }
-  when (reset.asBool) { trackers.foreach(_.valid := false.B) }
+
+  val ifpu = Module(new IntToFP(latency))
+  ifpu.io.in.valid := io.in.valid && fp_ctrl.fromint
+  ifpu.io.in.bits := fuInput(None, fp_ctrl, rm, inst)
+  ifpu.io.in.bits.in1 := io.in.bits.rs1_data
+
+  val fpmu = Module(new FPToFP(latency))
+  fpmu.io.lt := fpiu.io.out.bits.lt
+  fpmu.io.in.valid := io.in.valid && fp_ctrl.fastpipe
+  fpmu.io.in.bits := fuInput(None, fp_ctrl, rm, inst)
+
+
+  io.out.valid := ShiftRegister(io.in.valid && !(fp_ctrl.toint || fp_ctrl.div || fp_ctrl.sqrt), latency) && !ShiftRegister(io.s1_kill, latency-1)
+  io.out.bits := Mux1H(Seq(dfma.io.out, sfma.io.out, hfma.io.out, ifpu.io.out, fpmu.io.out).map { o =>
+    o.valid -> o.bits
+  })
+  io.out_rd := ShiftRegister(io.in.bits.rd, latency)
+  io.out_tag := ShiftRegister(fp_ctrl.typeTagOut, latency)
+
 }

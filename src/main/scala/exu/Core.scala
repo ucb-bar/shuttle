@@ -128,7 +128,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
       fp_decoder.io.sigs
     }
 
-    l.bits.ctrl.decode(r.bits.inst, decode_table) //sets fields of  lr(left-right)
+    l.bits.ctrl.decode(r.bits.inst, decode_table)
     l.bits.fp_ctrl := fp_decode(r.bits.inst)
     l.bits.is_bitmanip := is_bitmanip
   }
@@ -302,7 +302,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     val rrd_fence_stall = (i == 0).B && ((uop.system_insn || ctrl.fence || ctrl.amo || ctrl.fence_i) &&
       (ex_bsy || mem_bsy || wb_bsy || isboard_bsy || fsboard_bsy || !io.dmem.ordered || io.rocc.busy))
     val rrd_rocc_stall = (i == 0).B && ctrl.rocc && !io.rocc.cmd.ready
-    val is_pipe0 = uop.system_insn || ctrl.fence || ctrl.amo || ctrl.fence_i || uop.csr_en || uop.sfence || ctrl.csr =/= CSR.N || uop.xcpt || uop.uses_fp || ctrl.mul || ctrl.div || uop.is_bitmanip || ctrl.rocc || uop.uses_ifpu
+    val is_pipe0 = uop.system_insn || ctrl.fence || ctrl.amo || ctrl.fence_i || uop.csr_en || uop.sfence || ctrl.csr =/= CSR.N || uop.xcpt || uop.uses_fp || ctrl.mul || ctrl.div || uop.is_bitmanip || ctrl.rocc
     val is_youngest = uop.uses_brjmp || uop.next_pc.valid || uop.xcpt || uop.csr_en
 
 
@@ -351,21 +351,12 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     fsboard.foreach(_ := true.B)
   }
 
-  val ex_ifpu_uop = ex_uops_reg(0)
-  val ex_ifpu_inst = ex_ifpu_uop.bits.inst
-  val ex_fp_val = ex_uops_reg(0).valid && ex_uops_reg(0).bits.uses_fp
-  val ex_fp_fire = ex_fp_val && !ex_stall
-  val ex_fp_uop = ex_uops_reg(0)
-  val ex_fp_inst = ex_fp_uop.bits.inst
-  val ex_fp_rm = Mux(ex_fp_inst(14,12) === 7.U, io.fcsr_rm, ex_fp_inst(14,12))
-  val ex_fp_ctrl = ex_fp_uop.bits.fp_ctrl
-
-  val ex_frs1 = ex_fp_uop.bits.rs1
-  val ex_fra1 = ex_fp_uop.bits.fra1
-  val ex_frs2 = ex_fp_uop.bits.rs2
-  val ex_fra2 = ex_fp_uop.bits.fra2
-  val ex_frs3 = ex_fp_uop.bits.rs3
-  val ex_fra3 = ex_fp_uop.bits.fra3
+  val ex_frs1 = ex_uops_reg(0).bits.rs1
+  val ex_fra1 = ex_uops_reg(0).bits.fra1
+  val ex_frs2 = ex_uops_reg(0).bits.rs2
+  val ex_fra2 = ex_uops_reg(0).bits.fra2
+  val ex_frs3 = ex_uops_reg(0).bits.rs3
+  val ex_fra3 = ex_uops_reg(0).bits.fra3
 
   val ex_frs1_data = WireInit(fregfile(ex_fra1))
   val ex_frs2_data = WireInit(fregfile(ex_fra2))
@@ -375,9 +366,9 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   val frs2_older_hazard = !fsboard(ex_frs2)
   val frs3_older_hazard = !fsboard(ex_frs3)
 
-  val frs1_data_hazard = !fsboard(ex_frs1) && ex_fp_uop.bits.ctrl.rfs1 && ex_fp_uop.valid
-  val frs2_data_hazard = !fsboard(ex_frs2) && ex_fp_uop.bits.ctrl.rfs2 && ex_fp_uop.valid
-  val frs3_data_hazard = !fsboard(ex_frs3) && ex_fp_uop.bits.ctrl.rfs3 && ex_fp_uop.valid
+  val frs1_data_hazard = !fsboard(ex_frs1) && ex_uops_reg(0).bits.ctrl.rfs1 && ex_uops_reg(0).valid
+  val frs2_data_hazard = !fsboard(ex_frs2) && ex_uops_reg(0).bits.ctrl.rfs2 && ex_uops_reg(0).valid
+  val frs3_data_hazard = !fsboard(ex_frs3) && ex_uops_reg(0).bits.ctrl.rfs3 && ex_uops_reg(0).valid
   val frd_data_hazard = ex_uops_reg.map(u => {
     val ex_frd = u.bits.rd
     val frd_older_hazard = !fsboard(ex_frd)
@@ -388,64 +379,14 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
 
   val ex_fp_data_hazard = frs1_data_hazard || frs2_data_hazard || frs3_data_hazard || frd_data_hazard
 
-  def fuInput(minT: Option[FType], ctrl: FPUCtrlSigs, rm: UInt, inst: UInt): FPInput = {
-    val req = Wire(new FPInput)
-    val tag = ctrl.typeTagIn
-    req.ldst := ctrl.ldst
-    req.wen := ctrl.wen
-    req.ren1 := ctrl.ren1
-    req.ren2 := ctrl.ren2
-    req.ren3 := ctrl.ren3
-    req.swap12 := ctrl.swap12
-    req.swap23 := ctrl.swap23
-    req.typeTagIn := ctrl.typeTagIn
-    req.typeTagOut := ctrl.typeTagOut
-    req.fromint := ctrl.fromint
-    req.toint := ctrl.toint
-    req.fastpipe := ctrl.fastpipe
-    req.fma := ctrl.fma
-    req.div := ctrl.div
-    req.sqrt := ctrl.sqrt
-    req.wflags := ctrl.wflags
-    req.rm := rm
-    req.in1 := unbox(ex_frs1_data, tag, minT)
-    req.in2 := unbox(ex_frs2_data, tag, minT)
-    req.in3 := unbox(ex_frs3_data, tag, minT)
-    req.typ := inst(21,20)
-    req.fmt := inst(26,25)
-    req.fmaCmd := inst(3,2) | (!ctrl.ren3 && inst(27))
-    req
-  }
-
-  val fmas = Module(new SaturnFPUFMAPipe)
-  fmas.io.in.valid := ex_fp_ctrl.fma && ex_fp_fire && !ex_fp_uop.bits.xcpt
-  fmas.io.in.bits := Mux(ex_fp_ctrl.typeTagOut === D, fuInput(Some(FType.D), ex_fp_ctrl, ex_fp_rm, ex_fp_inst),
-    Mux(ex_fp_ctrl.typeTagOut === S, fuInput(Some(FType.S), ex_fp_ctrl, ex_fp_rm, ex_fp_inst),
-      fuInput(Some(FType.H), ex_fp_ctrl, ex_fp_rm, ex_fp_inst)))
-
-  val fpiu = Module(new FPToInt)
-  fpiu.io.in.valid := ((ex_fp_ctrl.toint || ex_fp_ctrl.div || ex_fp_ctrl.sqrt || (ex_fp_ctrl.fastpipe && ex_fp_ctrl.wflags)) &&
-    ex_fp_fire && !ex_fp_uop.bits.xcpt)
-  fpiu.io.in.bits := fuInput(None, ex_fp_ctrl, ex_fp_rm, ex_fp_inst)
-
-  val ifpu = Module(new SaturnIntToFP)
-  ifpu.io.in.valid := ex_ifpu_uop.valid && !ex_stall && !ex_ifpu_uop.bits.xcpt && ex_ifpu_uop.bits.uses_ifpu
-  ifpu.io.in.bits := fuInput(None, ex_ifpu_uop.bits.fp_ctrl,
-    Mux(ex_ifpu_inst(14,12) === 7.U, io.fcsr_rm, ex_ifpu_inst(14,12)), ex_ifpu_inst)
-  ifpu.io.in.bits.in1 := ex_ifpu_uop.bits.rs1_data
-  ifpu.io.in_rd := ex_ifpu_uop.bits.rd
-  ifpu.io.in_lt := DontCare
-  ifpu.io.in_out_tag := ex_ifpu_uop.bits.fp_ctrl.typeTagOut
-
-  val fpmu = Module(new SaturnFPToFP)
-  fpmu.io.in.valid := ex_fp_fire && ex_fp_ctrl.fastpipe && !ex_fp_uop.bits.xcpt
-  fpmu.io.in.bits := fpiu.io.in.bits
-
-  val fpus = Seq(fmas, fpmu)
-  fpus.foreach(_.io.in_rd := ex_fp_uop.bits.rd)
-  fpus.foreach(_.io.in_lt := fpiu.io.out.bits.lt)
-  fpus.foreach(_.io.in_out_tag := ex_fp_ctrl.typeTagOut)
-  val ex_fp_structural_hazard = (Seq(ifpu) ++ fpus).map(!_.io.ready).reduce(_||_)
+  val fp_pipe = Module(new SaturnFPPipe)
+  fp_pipe.io.in.valid := ex_uops_reg(0).valid && ex_uops_reg(0).bits.uses_fp && !ex_uops_reg(0).bits.xcpt && !ex_stall
+  fp_pipe.io.in.bits := ex_uops_reg(0).bits
+  fp_pipe.io.frs1_data := ex_frs1_data
+  fp_pipe.io.frs2_data := ex_frs2_data
+  fp_pipe.io.frs3_data := ex_frs3_data
+  fp_pipe.io.fcsr_rm := csr.io.fcsr_rm
+  io.fcsr_rm := csr.io.fcsr_rm
 
   val mulDivParams = tileParams.core.asInstanceOf[SaturnCoreParams].mulDiv.get
   require(mulDivParams.mulUnroll == 0)
@@ -535,8 +476,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   ex_stall := ex_uops_reg.map(_.valid).reduce(_||_) && (
     ex_fcsr_data_hazard ||
     ex_dmem_structural_hazard ||
-    ex_fp_data_hazard ||
-    ex_fp_structural_hazard
+    ex_fp_data_hazard
   )
 
   for (i <- 0 until retireWidth) {
@@ -552,8 +492,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
 
 
   //mem
-  fpus.foreach(_.io.killm := kill_mem)
-  ifpu.io.killm := kill_mem
+  fp_pipe.io.s1_kill := kill_mem
 
   val mem_brjmp_oh = mem_uops_reg.map({u => u.valid && (u.bits.uses_brjmp || u.bits.next_pc.valid)})
   val mem_brjmp_val = mem_brjmp_oh.reduce(_||_)
@@ -607,7 +546,6 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   when (mem_brjmp_val && mem_brjmp_mispredict) {
     flush_rrd .foreach(_ := true.B)
     flush_ex.foreach(_ := true.B)
-    (Seq(ifpu) ++ fpus).foreach(_.io.in.valid := false.B)
     io.imem.redirect_val := true.B
     io.imem.redirect_flush := true.B
     io.imem.redirect_pc := mem_brjmp_npc
@@ -626,14 +564,14 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
       mem_uops(i).bits.wdata.bits := mem_brjmp_target.asUInt
     }
     when (mem_uops(i).valid && ctrl.mem && isWrite(ctrl.mem_cmd)) {
-      io.dmem.s1_data.data := Mux(uop.ctrl.fp, fpiu.io.out.bits.store, uop.rs2_data)
+      io.dmem.s1_data.data := Mux(uop.ctrl.fp, fp_pipe.io.s1_store_data, uop.rs2_data)
     }
     when (mem_uops(i).valid && ctrl.fp && ctrl.wxd) {
       mem_uops(i).bits.wdata.valid := true.B
-      mem_uops(i).bits.wdata.bits := fpiu.io.out.bits.toint
+      mem_uops(i).bits.wdata.bits := fp_pipe.io.s1_fpiu_toint
     }
-    mem_uops(i).bits.fexc := fpiu.io.out.bits.exc
-    mem_uops(i).bits.fdivin := fpiu.io.out.bits.in
+    mem_uops(i).bits.fexc := fp_pipe.io.s1_fpiu_fexc
+    mem_uops(i).bits.fdivin := fp_pipe.io.s1_fpiu_fdiv
 
     mem_bypasses(i).valid := mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.wxd
     mem_bypasses(i).dst := mem_uops_reg(i).bits.rd
@@ -821,7 +759,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
 
   csr.io.fcsr_flags.valid := false.B
   csr.io.set_fs_dirty.map(_ := false.B)
-  val csr_fcsr_flags = Wire(Vec(4, UInt(FPConstants.FLAGS_SZ.W)))
+  val csr_fcsr_flags = Wire(Vec(3, UInt(FPConstants.FLAGS_SZ.W)))
   csr_fcsr_flags.foreach(_ := 0.U)
   csr.io.fcsr_flags.bits := csr_fcsr_flags.reduce(_|_)
 
@@ -945,7 +883,6 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     flush_ex.foreach(_ := true.B)
     flush_rrd .foreach(_ := true.B)
     for (i <- 1 until retireWidth) { kill_wb(i) := true.B }
-    (Seq(ifpu) ++ fpus).foreach(_.io.in.valid := false.B)
     io.imem.redirect_val := true.B
     io.imem.redirect_flush := true.B
     io.imem.redirect_pc := wb_uops(0).bits.pc + Mux(wb_uops(0).bits.rvc, 2.U, 4.U)
@@ -957,7 +894,6 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     flush_ex.foreach(_ := true.B)
     flush_rrd .foreach(_ := true.B)
     for (i <- 1 until retireWidth) { kill_wb(i) := true.B }
-    (Seq(ifpu) ++ fpus).foreach(_.io.in.valid := false.B)
     io.imem.redirect_val := true.B
     io.imem.redirect_flush := true.B
     io.imem.redirect_pc := csr.io.evec
@@ -968,7 +904,6 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     kill_mem := true.B
     flush_ex.foreach(_ := true.B)
     flush_rrd .foreach(_ := true.B)
-    (Seq(ifpu) ++ fpus).foreach(_.io.in.valid := false.B)
   }
   for (i <- 0 until retireWidth) {
     val killed_by_older_replay = replays.take(i).orR
@@ -1039,7 +974,6 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   val ll_fp_wval = WireInit(fp_load_val)
   val ll_fp_wdata = WireInit(0.U(65.W))
   val ll_fp_waddr = WireInit(fp_load_addr)
-  ifpu.io.out.ready := false.B
   when (fp_load_val) {
     ll_fp_wval := true.B
     ll_fp_wdata := recode(fp_load_data, fp_load_type)
@@ -1051,15 +985,6 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     divSqrt_val := false.B
     csr.io.fcsr_flags.valid := true.B
     csr_fcsr_flags(1) := divSqrt_flags
-  } .otherwise {
-    when (ifpu.io.out.valid) {
-      ifpu.io.out.ready := true.B
-      ll_fp_wval := true.B
-      ll_fp_wdata := box(ifpu.io.out.bits.data, ifpu.io.out_tag)
-      ll_fp_waddr := ifpu.io.out_rd
-      csr.io.fcsr_flags.valid := true.B
-      csr_fcsr_flags(3) := ifpu.io.out.bits.exc
-    }
   }
 
   when (ll_fp_wval) {
@@ -1069,36 +994,17 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     fsboard_wb_set(ll_fp_waddr) := true.B
   }
 
-  var ll_fma_write_found = false.B
-  fpus.foreach(_.io.out.ready := false.B)
-  val ll_fma_wval = WireInit(fpus(0).io.out.valid)
-  val ll_fma_waddr = WireInit(fpus(0).io.out_rd)
-  val ll_fma_wdata = WireInit(fpus(0).io.out.bits.data)
-  val ll_fma_wtag = WireInit(fpus(0).io.out_tag)
-  val ll_fma_wexc = WireInit(fpus(0).io.out.bits.exc)
-  for (fma <- fpus) {
-    when (!ll_fma_write_found) {
-      ll_fma_wval  := fma.io.out.valid
-      ll_fma_waddr := fma.io.out_rd
-      ll_fma_wdata := fma.io.out.bits.data
-      ll_fma_wtag  := fma.io.out_tag
-      ll_fma_wexc := fma.io.out.bits.exc
-      fma.io.out.ready := true.B
-    }
-    ll_fma_write_found = ll_fma_write_found || fma.io.out.valid
-  }
-
-  when (ll_fma_wval) {
-    val wdata = box(ll_fma_wdata, ll_fma_wtag)
+  when (fp_pipe.io.out.valid) {
+    val wdata = box(fp_pipe.io.out.bits.data, fp_pipe.io.out_tag)
     val ieee_wdata = ieee(wdata)
-    printf("f%d p%d 0x%x\n", ll_fma_waddr, ll_fma_waddr + 32.U, ieee_wdata)
-    fregfile(ll_fma_waddr) := wdata
-    fsboard_wb_set(ll_fma_waddr) := true.B
+    val waddr = fp_pipe.io.out_rd
+    printf("f%d p%d 0x%x\n", waddr, waddr + 32.U, ieee_wdata)
+    fregfile(waddr) := wdata
+    fsboard_wb_set(waddr) := true.B
     csr.io.fcsr_flags.valid := true.B
-    csr.io.set_fs_dirty.map(_ := true.B)
-    csr_fcsr_flags(2) := ll_fma_wexc
+    csr.io.set_fs_dirty.foreach(_ := true.B)
+    csr_fcsr_flags(2) := fp_pipe.io.out.bits.exc
   }
-
 
   for (i <- 0 until retireWidth) {
     when (reset.asBool) {
