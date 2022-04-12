@@ -13,8 +13,9 @@ import saturn.util._
 
 class SaturnFetchBuffer(implicit p: Parameters) extends CoreModule
 {
-
-  val numEntries = retireWidth * 3
+  // This is an approximate heuristic to ensure that
+  // this buffer rarely backpresures the frontend
+  val numEntries = (retireWidth * 3) + 1
   val io = IO(new Bundle {
     val enq = Flipped(Decoupled(new SaturnFetchBundle))
     val deq = Vec(retireWidth, Decoupled(new SaturnUOP))
