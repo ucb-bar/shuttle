@@ -131,7 +131,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   }
 
   for (i <- 0 until retireWidth) {
-    csr.io.decode(i).csr := rrd_uops(i).bits.inst(31,20)
+    csr.io.decode(i).inst := rrd_uops(i).bits.inst
   }
 
   val rrd_illegal_insn = Wire(Vec(retireWidth, Bool()))
@@ -889,6 +889,8 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     io.imem.sfence.bits.rs2 := wb_uops(0).bits.mem_size(1)
     io.imem.sfence.bits.addr := wb_uops(0).bits.wdata.bits
     io.imem.sfence.bits.asid := wb_uops(0).bits.rs2_data
+    io.imem.sfence.bits.hv := wb_uops(0).bits.ctrl.mem_cmd === M_HFENCEV
+    io.imem.sfence.bits.hg := wb_uops(0).bits.ctrl.mem_cmd === M_HFENCEG
   }
 
   val replays = wb_uops.map({u => u.valid && u.bits.needs_replay})

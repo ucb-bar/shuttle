@@ -56,6 +56,8 @@ case class SaturnCoreParams(
   val useSupervisor: Boolean = false
   val useUser: Boolean = false
   val useVM: Boolean = true
+  val nPTECacheEntries: Int = 0
+  val useHypervisor: Boolean = false
   val asRocketCoreParams: RocketCoreParams = RocketCoreParams(
     bootFreqHz = bootFreqHz,
     useVM = useVM,
