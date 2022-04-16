@@ -144,7 +144,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     val csr_en = uop.csr_en
     val csr_ren = uop.csr_ren
     val csr_wen = uop.csr_wen
-    val csr_ren_illegal = csr_ren && csr.io.decode(i).read_illegal
+    val csr_ren_illegal = csr.io.decode(i).read_illegal
     val csr_wen_illegal = csr_wen && csr.io.decode(i).write_illegal
     val sfence = ctrl.mem && ctrl.mem_cmd === M_SFENCE
     val system_insn = uop.system_insn
