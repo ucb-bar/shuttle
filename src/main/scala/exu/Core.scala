@@ -842,7 +842,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
       when (com) {
         printf("%d 0x%x ",
           csr.io.status.prv,
-          Sext(wb_uops(i).bits.pc, 64))
+          wb_uops(i).bits.pc)
       } .otherwise {
         printf("____________________ ")
       }
@@ -885,12 +885,12 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
 
   when (wb_uops(0).valid && wb_uops(0).bits.sfence && !wb_uops(0).bits.xcpt && !wb_uops(0).bits.needs_replay) {
     io.imem.sfence.valid := true.B
-    io.imem.sfence.bits.rs1 := wb_uops(0).bits.mem_size(0)
-    io.imem.sfence.bits.rs2 := wb_uops(0).bits.mem_size(1)
-    io.imem.sfence.bits.addr := wb_uops(0).bits.wdata.bits
-    io.imem.sfence.bits.asid := wb_uops(0).bits.rs2_data
-    io.imem.sfence.bits.hv := wb_uops(0).bits.ctrl.mem_cmd === M_HFENCEV
-    io.imem.sfence.bits.hg := wb_uops(0).bits.ctrl.mem_cmd === M_HFENCEG
+    io.imem.sfence.bits.rs1 := wb_uops_reg(0).bits.mem_size(0)
+    io.imem.sfence.bits.rs2 := wb_uops_reg(0).bits.mem_size(1)
+    io.imem.sfence.bits.addr := wb_uops_reg(0).bits.wdata.bits
+    io.imem.sfence.bits.asid := wb_uops_reg(0).bits.rs2_data
+    io.imem.sfence.bits.hv := wb_uops_reg(0).bits.ctrl.mem_cmd === M_HFENCEV
+    io.imem.sfence.bits.hg := wb_uops_reg(0).bits.ctrl.mem_cmd === M_HFENCEG
   }
 
   val replays = wb_uops.map({u => u.valid && u.bits.needs_replay})
