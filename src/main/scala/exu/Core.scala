@@ -838,7 +838,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
           csr.io.status.prv,
           wb_uops(i).bits.pc)
       } .otherwise {
-        printf("____________________ ")
+        printf("____" + "_" * ((vaddrBitsExtended + 3)/ 4) + " ")
       }
       when (!usePipelinePrints) {
         when (wb_uops(i).bits.rvc) {
