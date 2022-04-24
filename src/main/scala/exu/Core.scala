@@ -97,7 +97,10 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   for (i <- 0 until retireWidth) {
     when (!ex_stall) {
       ex_uops_reg(i).bits := rrd_uops(i).bits
-      ex_uops_reg(i).valid := rrd_uops(i).valid && !flush_rrd_ex && !rrd_stall(i)
+      ex_uops_reg(i).valid := rrd_uops(i).valid && !rrd_stall(i)
+    }
+    when (flush_rrd_ex) {
+      ex_uops_reg(i).valid := false.B
     }
 
     mem_uops_reg(i).bits := ex_uops_reg(i).bits
