@@ -723,7 +723,6 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     io.rocc.cmd.bits.inst := wb_rocc_uop.bits.inst.asTypeOf(new RoCCInstruction)
     io.rocc.cmd.bits.rs1 := wb_rocc_uop.bits.rs1_data
     io.rocc.cmd.bits.rs2 := wb_rocc_uop.bits.rs2_data
-    assert(!(io.rocc.cmd.valid && !io.rocc.cmd.ready))
   }
 
   val wb_xcpt_uop = wb_uops(0)
