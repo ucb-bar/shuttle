@@ -131,7 +131,7 @@ class SaturnTileModuleImp(outer: SaturnTile) extends BaseTileModuleImp(outer)
   outer.decodeCoreInterrupts(core.io.interrupts) // Decode the interrupt vector
 
   // Pass through various external constants and reports that were bundle-bridged into the tile
-  outer.traceSourceNode.bundle <> core.io.trace
+  outer.extTraceSourceNode.bundle <> core.io.trace
   core.io.hartid := outer.hartIdSinkNode.bundle
   require(core.io.hartid.getWidth >= outer.hartIdSinkNode.bundle.getWidth,
     s"core hartid wire (${core.io.hartid.getWidth}) truncates external hartid wire (${outer.hartIdSinkNode.bundle.getWidth}b)")
