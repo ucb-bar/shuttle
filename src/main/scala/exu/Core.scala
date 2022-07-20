@@ -576,7 +576,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     }
     when (mem_brjmp_oh(i) && mem_uops_reg(i).bits.ctrl.jalr) {
       wb_uops_reg(i).bits.wdata.valid := true.B
-      wb_uops_reg(i).bits.wdata.bits := mem_brjmp_target.asUInt
+      wb_uops_reg(i).bits.wdata.bits := Sext(mem_brjmp_target.asUInt, 64)
     }
     when (mem_uops_reg(i).valid && ctrl.mem && isWrite(ctrl.mem_cmd)) {
       io.dmem.s1_data.data := uop.rs2_data
