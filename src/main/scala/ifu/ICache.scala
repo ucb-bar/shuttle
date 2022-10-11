@@ -14,9 +14,6 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import freechips.rocketchip.util.property._
 import freechips.rocketchip.rocket.{HasL1ICacheParameters, ICacheParams, ICacheErrors, ICacheReq}
-import freechips.rocketchip.diplomaticobjectmodel.logicaltree.{LogicalTreeNode}
-import freechips.rocketchip.diplomaticobjectmodel.DiplomaticObjectModelAddressing
-import freechips.rocketchip.diplomaticobjectmodel.model.{OMComponent, OMICache, OMECC}
 
 class SaturnICache(
   val icacheParams: ICacheParams,
@@ -87,7 +84,7 @@ class SaturnICacheModule(outer: SaturnICache) extends LazyModuleImp(outer)
     LFSR(16, refill_fire)(log2Up(nWays)-1,0)
   }
 
-  val (tag_array, omSRAM) = DescribedSRAM(
+  val tag_array = DescribedSRAM(
     name = "tag_array",
     desc = "ICache Tag Array",
     size = nSets,
@@ -138,7 +135,7 @@ class SaturnICacheModule(outer: SaturnICache) extends LazyModuleImp(outer)
       )
   }
 
-  for (((data_array, omSRAM), i) <- data_arrays zipWithIndex) {
+  for ((data_array, i) <- data_arrays zipWithIndex) {
     def wordMatch(addr: UInt) = addr.extract(log2Ceil(tl_out.d.bits.data.getWidth/8)-1, log2Ceil(wordBits/8)) === i.U
     def row(addr: UInt) = addr(untagBits-1, blockOffBits-log2Ceil(refillCycles))
     val s0_ren = s0_valid && wordMatch(s0_vaddr)

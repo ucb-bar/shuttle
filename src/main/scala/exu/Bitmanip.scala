@@ -40,8 +40,8 @@ class BitmanipDecode(implicit val p: Parameters) extends DecodeConstants with Ha
     CTZ                -> List(Y,N,N,N,N,N,X,Y,X,A2_X  , A1_RS1, IMM_X, DW_XPR,FN_CTZ(4,1)  , N,FN_CTZ(0)  , N,N,N,N,N,N,Y,CSR.N,N,N,N,N),
     CTZW               -> List(Y,N,N,N,N,N,X,Y,X,A2_X  , A1_RS1, IMM_X, DW_32 ,FN_CTZ(4,1)  , N,FN_CTZ(0)  , N,N,N,N,N,N,Y,CSR.N,N,N,N,N),
 
-    PCNT               -> List(Y,N,N,N,N,N,X,Y,X,A2_X  , A1_RS1, IMM_X, DW_XPR,FN_PCNT(4,1) , N,FN_PCNT(0) , N,N,N,N,N,N,Y,CSR.N,N,N,N,N),
-    PCNTW              -> List(Y,N,N,N,N,N,X,Y,X,A2_X  , A1_RS1, IMM_X, DW_32 ,FN_PCNT(4,1) , N,FN_PCNT(0) , N,N,N,N,N,N,Y,CSR.N,N,N,N,N),
+    CPOP               -> List(Y,N,N,N,N,N,X,Y,X,A2_X  , A1_RS1, IMM_X, DW_XPR,FN_PCNT(4,1) , N,FN_PCNT(0) , N,N,N,N,N,N,Y,CSR.N,N,N,N,N),
+    CPOPW              -> List(Y,N,N,N,N,N,X,Y,X,A2_X  , A1_RS1, IMM_X, DW_32 ,FN_PCNT(4,1) , N,FN_PCNT(0) , N,N,N,N,N,N,Y,CSR.N,N,N,N,N),
 
     MAX                -> List(Y,N,N,N,N,N,Y,Y,X,A2_RS2, A1_RS1, IMM_X, DW_XPR,FN_MAX(4,1)  , N,FN_MAX(0)  , N,N,N,N,N,N,Y,CSR.N,N,N,N,N),
     MAXU               -> List(Y,N,N,N,N,N,Y,Y,X,A2_RS2, A1_RS1, IMM_X, DW_XPR,FN_MAXU(4,1) , N,FN_MAXU(0) , N,N,N,N,N,N,Y,CSR.N,N,N,N,N),

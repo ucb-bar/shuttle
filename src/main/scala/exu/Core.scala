@@ -120,7 +120,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   (rrd_uops zip io.imem.resp).foreach { case (l,r) =>
     val bitmanipMasks = Seq(
       ANDN, ORN, XNOR, CLZ, CLZW, CTZ, CTZW,
-      PCNT, PCNTW, MAX, MAXU, MIN, MINU,
+      CPOP, CPOPW, MAX, MAXU, MIN, MINU,
       SEXT_B, SEXT_H, ZEXT_H,
       ROL, ROLW, ROR, RORI, RORIW, RORW,
       ORC_B, REV8, PACK)
