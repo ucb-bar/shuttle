@@ -1,4 +1,4 @@
-package saturn.ifu
+package shuttle.ifu
 
 import chisel3._
 import chisel3.util._
@@ -15,12 +15,12 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.util.property._
 import freechips.rocketchip.rocket.{HasL1ICacheParameters, ICacheParams, ICacheErrors, ICacheReq}
 
-class SaturnICache(
+class GhuttleICache(
   val icacheParams: ICacheParams,
   val staticIdForMetadataUseOnly: Int)(implicit p: Parameters)
     extends LazyModule
 {
-  lazy val module = new SaturnICacheModule(this)
+  lazy val module = new GhuttleICacheModule(this)
   val masterNode = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1(
     sourceId = IdRange(0, 1 + icacheParams.prefetch.toInt), // 0=refill, 1=hint
     name = s"Core ${staticIdForMetadataUseOnly} ICache")))))
@@ -30,7 +30,7 @@ class SaturnICache(
 }
 
 
-class SaturnICacheModule(outer: SaturnICache) extends LazyModuleImp(outer)
+class GhuttleICacheModule(outer: GhuttleICache) extends LazyModuleImp(outer)
   with HasL1ICacheParameters
 {
   override val cacheParams = outer.icacheParams

@@ -1,4 +1,4 @@
-package saturn.exu
+package shuttle.exu
 
 import chisel3._
 import chisel3.util._
@@ -8,17 +8,17 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.rocket.Instructions._
 
-import saturn.common._
-import saturn.ifu._
-import saturn.util._
+import shuttle.common._
+import shuttle.ifu._
+import shuttle.util._
 
-class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(p)
+class GhuttleCore(tile: GhuttleTile)(implicit p: Parameters) extends CoreModule()(p)
   with HasFPUParameters
 {
   val io = IO(new Bundle {
     val hartid = Input(UInt(hartIdLen.W))
     val interrupts = Input(new CoreInterrupts())
-    val imem  = new SaturnFrontendIO
+    val imem  = new GhuttleFrontendIO
     val dmem = new HellaCacheIO
     val ptw = Flipped(new DatapathPTWIO())
     val rocc = Flipped(new RoCCCoreIO())
@@ -39,7 +39,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   csr.io.ungated_clock := clock
 
   val fpParams = tileParams.core.fpu.get
-  val fpWidth = tileParams.core.asInstanceOf[SaturnCoreParams].fpWidth
+  val fpWidth = tileParams.core.asInstanceOf[GhuttleCoreParams].fpWidth
 
   def checkExceptions(x: Seq[(Bool, UInt)]) =
     (x.map(_._1).reduce(_||_), PriorityMux(x))
@@ -72,10 +72,10 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   val fp_bypasses: Seq[Bypass] = fp_wb_bypasses ++ fp_mem_bypasses
   assert(!fp_bypasses.map(b => b.valid && b.can_bypass).reduce(_||_))
 
-  val rrd_uops = Wire(Vec(retireWidth, Valid(new SaturnUOP)))
-  val ex_uops_reg = Reg(Vec(retireWidth, Valid(new SaturnUOP)))
-  val mem_uops_reg = Reg(Vec(retireWidth, Valid(new SaturnUOP)))
-  val wb_uops_reg = Reg(Vec(retireWidth, Valid(new SaturnUOP)))
+  val rrd_uops = Wire(Vec(retireWidth, Valid(new GhuttleUOP)))
+  val ex_uops_reg = Reg(Vec(retireWidth, Valid(new GhuttleUOP)))
+  val mem_uops_reg = Reg(Vec(retireWidth, Valid(new GhuttleUOP)))
+  val wb_uops_reg = Reg(Vec(retireWidth, Valid(new GhuttleUOP)))
   val wb_uops = WireInit(wb_uops_reg)
 
 
@@ -234,7 +234,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
 
   val rrd_stall_data = Wire(Vec(retireWidth, Bool()))
   val rrd_irf_writes = Wire(Vec(retireWidth, Valid(UInt(5.W))))
-  val enableMemALU = coreParams.asInstanceOf[SaturnCoreParams].enableMemALU && retireWidth > 1
+  val enableMemALU = coreParams.asInstanceOf[GhuttleCoreParams].enableMemALU && retireWidth > 1
   val rrd_mem_p0_can_forward = rrd_uops(0).bits.ctrl.wxd && rrd_uops(0).bits.uses_alu && enableMemALU.B
   for (i <- 0 until retireWidth) {
     val fp_ctrl = rrd_uops(i).bits.fp_ctrl
@@ -374,7 +374,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     fsboard.foreach(_ := true.B)
   }
 
-  val fp_pipes = Seq.fill(fpWidth) { Module(new SaturnFPPipe) }
+  val fp_pipes = Seq.fill(fpWidth) { Module(new GhuttleFPPipe) }
 
   val ex_fp_data_hazard = Seq.fill(retireWidth) { WireInit(false.B) }
   for (i <- 0 until retireWidth) {
@@ -415,7 +415,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
   }
   val ex_fcsr_data_hazard = ex_uops_reg(0).valid && ex_uops_reg(0).bits.csr_en && (fsboard_bsy || mem_bsy || wb_bsy)
 
-  val mulDivParams = tileParams.core.asInstanceOf[SaturnCoreParams].mulDiv.get
+  val mulDivParams = tileParams.core.asInstanceOf[GhuttleCoreParams].mulDiv.get
   require(mulDivParams.mulUnroll == 0)
 
   val mul = Module(new PipelinedMultiplier(64, 2))
@@ -802,7 +802,7 @@ class SaturnCore(tile: SaturnTile)(implicit p: Parameters) extends CoreModule()(
     }
   }
 
-  val usePipelinePrints = PlusArg("saturn_pipe_prints", width=1, default=0)(0)
+  val usePipelinePrints = PlusArg("shuttle_pipe_prints", width=1, default=0)(0)
   for (i <- 0 until retireWidth) {
     val waddr = wb_uops(i).bits.rd
     val wdata = wb_uops(i).bits.wdata.bits

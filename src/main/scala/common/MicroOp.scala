@@ -1,4 +1,4 @@
-package saturn.common
+package shuttle.common
 import chisel3._
 import chisel3.util._
 
@@ -8,7 +8,7 @@ import freechips.rocketchip.tile._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.util._
 
-class SaturnUOP(implicit p: Parameters) extends CoreBundle {
+class GhuttleUOP(implicit p: Parameters) extends CoreBundle {
   val nRAS = tileParams.btb.get.nRAS
   val inst = UInt(32.W)
   val raw_inst = UInt(32.W)

@@ -1,4 +1,4 @@
-package saturn.ifu
+package shuttle.ifu
 
 import Chisel._
 import Chisel.ImplicitConversions._
@@ -13,15 +13,15 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.util.property._
 
 // Forked from Rocket
-class SaturnBTBUpdate(implicit p: Parameters) extends BTBUpdate()(p) {
+class GhuttleBTBUpdate(implicit p: Parameters) extends BTBUpdate()(p) {
   val mispredict = Bool()
 }
 
-class SaturnBTB(implicit p: Parameters) extends BtbModule {
+class GhuttleBTB(implicit p: Parameters) extends BtbModule {
   val io = new Bundle {
     val req = Valid(new BTBReq).flip
     val resp = Valid(new BTBResp)
-    val btb_update = Valid(new SaturnBTBUpdate).flip
+    val btb_update = Valid(new GhuttleBTBUpdate).flip
     val bht_update = Valid(new BHTUpdate).flip
     val bht_advance = Valid(new BTBResp).flip
     val flush = Bool().asInput

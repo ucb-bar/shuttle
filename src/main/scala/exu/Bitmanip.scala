@@ -1,4 +1,4 @@
-package saturn.exu
+package shuttle.exu
 
 import chisel3._
 import chisel3.util._
@@ -13,9 +13,9 @@ import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.tile.CoreModule
 import freechips.rocketchip.rocket.constants.ScalarOpConstants
 
-import saturn.common._
-import saturn.ifu._
-import saturn.util._
+import shuttle.common._
+import shuttle.ifu._
+import shuttle.util._
 
 
 class BitmanipDecode(implicit val p: Parameters) extends DecodeConstants with HasBitmanipConstants

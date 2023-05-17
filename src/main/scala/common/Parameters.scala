@@ -1,4 +1,4 @@
-package saturn.common
+package shuttle.common
 
 import chisel3._
 import chisel3.util._
@@ -10,7 +10,7 @@ import freechips.rocketchip.subsystem.{MemoryPortParams}
 import freechips.rocketchip.config.{Parameters, Field}
 import freechips.rocketchip.devices.tilelink.{BootROMParams, CLINTParams, PLICParams}
 
-case class SaturnCoreParams(
+case class GhuttleCoreParams(
   nL2TLBEntries: Int = 512,
   nL2TLBWays: Int = 1,
 

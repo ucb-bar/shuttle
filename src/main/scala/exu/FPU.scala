@@ -1,4 +1,4 @@
-package saturn.exu
+package shuttle.exu
 
 import chisel3._
 import chisel3.util._
@@ -10,12 +10,12 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.util.property._
 import freechips.rocketchip.tile._
 
-import saturn.common._
+import shuttle.common._
 
-class SaturnFPPipe(implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetimed {
+class GhuttleFPPipe(implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetimed {
   val latency = tileParams.core.fpu.get.dfmaLatency
   val io = new Bundle {
-    val in = Input(Valid(new SaturnUOP))
+    val in = Input(Valid(new GhuttleUOP))
     val frs1_data = Input(UInt(65.W))
     val frs2_data = Input(UInt(65.W))
     val frs3_data = Input(UInt(65.W))
