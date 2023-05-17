@@ -60,4 +60,5 @@ case class ShuttleCoreParams(
   val useVM: Boolean = true
   val nPTECacheEntries: Int = 0
   val useHypervisor: Boolean = false
+  val useConditionalZero = true
 }
