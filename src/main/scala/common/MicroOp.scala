@@ -5,7 +5,7 @@ import chisel3.util._
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.tile._
-import freechips.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.util._
 
 class GhuttleUOP(implicit p: Parameters) extends CoreBundle {

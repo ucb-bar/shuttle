@@ -6,7 +6,7 @@ import chisel3.util._
 import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.util.{Str}
-import freechips.rocketchip.config.{Parameters}
+import org.chipsalliance.cde.config.{Parameters}
 import freechips.rocketchip.tile.{TileKey}
 
 // Set all bits at or below the highest order '1'.

@@ -5,7 +5,7 @@ import chisel3.util.{RRArbiter, Queue}
 
 import scala.collection.mutable.{ListBuffer}
 
-import freechips.rocketchip.config._
+import org.chipsalliance.cde.config._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
