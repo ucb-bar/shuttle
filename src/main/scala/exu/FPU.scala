@@ -14,7 +14,7 @@ import shuttle.common._
 
 class ShuttleFPPipe(implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetimed {
   val latency = tileParams.core.fpu.get.dfmaLatency
-  val io = new Bundle {
+  val io = IO(new Bundle {
     val in = Input(Valid(new ShuttleUOP))
     val frs1_data = Input(UInt(65.W))
     val frs2_data = Input(UInt(65.W))
@@ -29,7 +29,7 @@ class ShuttleFPPipe(implicit p: Parameters) extends FPUModule()(p) with ShouldBe
     val out = Valid(new FPResult)
     val out_rd = Output(UInt(5.W))
     val out_tag = Output(UInt(2.W))
-  }
+  })
 
   def fuInput(minT: Option[FType], ctrl: FPUCtrlSigs, rm: UInt, inst: UInt): FPInput = {
     val req = Wire(new FPInput)

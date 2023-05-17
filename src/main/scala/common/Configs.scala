@@ -99,12 +99,3 @@ class WithL1DCacheMSHRs(n: Int) extends Config((site, here, up) => {
     case other => other
   }
 })
-
-class WithShuttleFPWidth(w: Int)extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
-    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
-      core = tp.tileParams.core.copy(fpWidth = w)
-    ))
-    case other => other
-  }
-})

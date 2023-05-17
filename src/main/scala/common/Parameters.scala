@@ -17,12 +17,10 @@ case class ShuttleCoreParams(
   enableMemALU: Boolean = true,
   retireWidth: Int = 2,
   fetchWidth: Int = 4,
-  fpWidth: Int = 1,
   traceHasWdata: Boolean = false,
 ) extends CoreParams
 {
   require(Seq(4, 8, 16, 32).contains(fetchWidth))
-  require(fpWidth <= retireWidth)
   override def minFLen: Int = 16
 
   val useBitManip: Boolean = false

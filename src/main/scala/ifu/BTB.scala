@@ -1,8 +1,7 @@
 package shuttle.ifu
 
-import Chisel._
-import Chisel.ImplicitConversions._
-import chisel3.WireInit
+import chisel3._
+import chisel3.util._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.diplomacy._
@@ -18,27 +17,27 @@ class ShuttleBTBUpdate(implicit p: Parameters) extends BTBUpdate()(p) {
 }
 
 class ShuttleBTB(implicit p: Parameters) extends BtbModule {
-  val io = new Bundle {
-    val req = Valid(new BTBReq).flip
+  val io = IO(new Bundle {
+    val req = Flipped(Valid(new BTBReq))
     val resp = Valid(new BTBResp)
-    val btb_update = Valid(new ShuttleBTBUpdate).flip
-    val bht_update = Valid(new BHTUpdate).flip
-    val bht_advance = Valid(new BTBResp).flip
-    val flush = Bool().asInput
-  }
+    val btb_update = Flipped(Valid(new ShuttleBTBUpdate))
+    val bht_update = Flipped(Valid(new BHTUpdate))
+    val bht_advance = Flipped(Valid(new BTBResp))
+    val flush = Input(Bool())
+  })
 
-  val idxs = Reg(Vec(entries, UInt(width=matchBits - log2Up(coreInstBytes))))
-  val idxPages = Reg(Vec(entries, UInt(width=log2Up(nPages))))
-  val tgts = Reg(Vec(entries, UInt(width=matchBits - log2Up(coreInstBytes))))
-  val tgtPages = Reg(Vec(entries, UInt(width=log2Up(nPages))))
+  val idxs = Reg(Vec(entries, UInt((matchBits - log2Up(coreInstBytes)).W)))
+  val idxPages = Reg(Vec(entries, UInt(log2Up(nPages).W)))
+  val tgts = Reg(Vec(entries, UInt((matchBits - log2Up(coreInstBytes)).W)))
+  val tgtPages = Reg(Vec(entries, UInt(log2Up(nPages).W)))
   val ubits = Reg(Vec(entries, Bool()))
-  val pages = Reg(Vec(nPages, UInt(width=vaddrBits - matchBits)))
-  val pageValid = Reg(init = UInt(0, nPages))
+  val pages = Reg(Vec(nPages, UInt((vaddrBits - matchBits).W)))
+  val pageValid = RegInit(0.U(nPages.W))
   val pagesMasked = (pageValid.asBools zip pages).map { case (v, p) => Mux(v, p, 0.U) }
 
-  val isValid = Reg(init = UInt(0, entries))
+  val isValid = RegInit(0.U(entries.W))
   val cfiType = Reg(Vec(entries, CFIType()))
-  val brIdx = Reg(Vec(entries, UInt(width=log2Up(fetchWidth))))
+  val brIdx = Reg(Vec(entries, UInt(log2Up(fetchWidth).W)))
 
   private def page(addr: UInt) = addr >> matchBits
   private def pageMatch(addr: UInt) = {
@@ -61,27 +60,27 @@ class ShuttleBTB(implicit p: Parameters) extends BtbModule {
     if (updatesOutOfOrder) {
       val updateHits = (pageHit << 1)(Mux1H(idxMatch(r_btb_update.bits.pc), idxPages))
       (updateHits.orR, OHToUInt(updateHits))
-    } else (r_btb_update.bits.prediction.entry < entries, r_btb_update.bits.prediction.entry)
+    } else (r_btb_update.bits.prediction.entry < entries.U, r_btb_update.bits.prediction.entry)
 
   val useUpdatePageHit = updatePageHit.orR
   val usePageHit = pageHit.orR
   val doIdxPageRepl = !useUpdatePageHit
   val nextPageRepl = RegInit(0.U(log2Ceil(nPages).W))
-  val idxPageRepl = Cat(pageHit(nPages-2,0), pageHit(nPages-1)) | Mux(usePageHit, UInt(0), UIntToOH(nextPageRepl))
+  val idxPageRepl = Cat(pageHit(nPages-2,0), pageHit(nPages-1)) | Mux(usePageHit, 0.U, UIntToOH(nextPageRepl))
   val idxPageUpdateOH = Mux(useUpdatePageHit, updatePageHit, idxPageRepl)
   val idxPageUpdate = OHToUInt(idxPageUpdateOH)
-  val idxPageReplEn = Mux(doIdxPageRepl, idxPageRepl, UInt(0))
+  val idxPageReplEn = Mux(doIdxPageRepl, idxPageRepl, 0.U)
 
   val samePage = page(r_btb_update.bits.pc) === page(update_target)
   val doTgtPageRepl = !samePage && !usePageHit
   val tgtPageRepl = Mux(samePage, idxPageUpdateOH, Cat(idxPageUpdateOH(nPages-2,0), idxPageUpdateOH(nPages-1)))
-  val tgtPageUpdate = OHToUInt(pageHit | Mux(usePageHit, UInt(0), tgtPageRepl))
-  val tgtPageReplEn = Mux(doTgtPageRepl, tgtPageRepl, UInt(0))
+  val tgtPageUpdate = OHToUInt(pageHit | Mux(usePageHit, 0.U, tgtPageRepl))
+  val tgtPageReplEn = Mux(doTgtPageRepl, tgtPageRepl, 0.U)
 
   when (r_btb_update.valid && r_btb_update.bits.mispredict && (doIdxPageRepl || doTgtPageRepl)) {
     val both = doIdxPageRepl && doTgtPageRepl
-    val next = nextPageRepl + Mux[UInt](both, 2, 1)
-    nextPageRepl := Mux(next >= nPages, next(0), next)
+    val next = nextPageRepl + Mux[UInt](both, 2.U, 1.U)
+    nextPageRepl := Mux(next >= nPages.U, next(0), next)
   }
 
   val repl = new PseudoLRU(entries)
@@ -92,17 +91,17 @@ class ShuttleBTB(implicit p: Parameters) extends BtbModule {
   }
 
   when (r_btb_update.valid && r_btb_update.bits.mispredict) {
-    ubits(waddr) := 0
+    ubits(waddr) := 0.U
   }
   when (r_btb_update.valid && !r_btb_update.bits.mispredict) {
-    ubits(waddr) := 1
+    ubits(waddr) := 1.U
   }
   when (r_btb_update.valid && r_btb_update.bits.mispredict && !(updateHit && ubits(waddr) && isValid(waddr))) {
     val mask = UIntToOH(waddr)
     idxs(waddr) := r_btb_update.bits.pc(matchBits-1, log2Up(coreInstBytes))
     tgts(waddr) := update_target(matchBits-1, log2Up(coreInstBytes))
-    ubits(waddr) := 1
-    idxPages(waddr) := idxPageUpdate +& 1 // the +1 corresponds to the <<1 on io.resp.valid
+    ubits(waddr) := 1.U
+    idxPages(waddr) := idxPageUpdate +& 1.U // the +1 corresponds to the <<1 on io.resp.valid
     tgtPages(waddr) := tgtPageUpdate
     cfiType(waddr) := r_btb_update.bits.cfiType
     isValid := Mux(r_btb_update.bits.isValid, isValid | mask, isValid & ~mask)
@@ -124,11 +123,11 @@ class ShuttleBTB(implicit p: Parameters) extends BtbModule {
   }
 
   io.resp.valid := (pageHit << 1)(Mux1H(idxHit, idxPages))
-  io.resp.bits.taken := true
+  io.resp.bits.taken := true.B
   io.resp.bits.target := Cat(pagesMasked(Mux1H(idxHit, tgtPages)), Mux1H(idxHit, tgts) << log2Up(coreInstBytes))
   io.resp.bits.entry := OHToUInt(idxHit)
-  io.resp.bits.bridx := (if (fetchWidth > 1) Mux1H(idxHit, brIdx) else UInt(0))
-  io.resp.bits.mask := Cat((UInt(1) << ~Mux(io.resp.bits.taken, ~io.resp.bits.bridx, UInt(0)))-1, UInt(1))
+  io.resp.bits.bridx := (if (fetchWidth > 1) Mux1H(idxHit, brIdx) else 0.U)
+  io.resp.bits.mask := Cat((1.U << ~Mux(io.resp.bits.taken, ~io.resp.bits.bridx, 0.U))-1.U, 1.U)
   io.resp.bits.cfiType := Mux1H(idxHit, cfiType)
 
   // if multiple entries for same PC land in BTB, zap them
@@ -136,7 +135,7 @@ class ShuttleBTB(implicit p: Parameters) extends BtbModule {
     isValid := isValid & ~idxHit
   }
   when (io.flush) {
-    isValid := 0
+    isValid := 0.U
   }
 
   if (btbParams.bhtParams.nonEmpty) {
@@ -156,7 +155,7 @@ class ShuttleBTB(implicit p: Parameters) extends BtbModule {
         bht.resetHistory(io.bht_update.bits.prediction)
       }
     }
-    when (!res.taken && isBranch) { io.resp.bits.taken := false }
+    when (!res.taken && isBranch) { io.resp.bits.taken := false.B }
     io.resp.bits.bht := res
   }
 }
