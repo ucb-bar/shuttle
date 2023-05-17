@@ -10,7 +10,7 @@ import freechips.rocketchip.subsystem.{MemoryPortParams}
 import org.chipsalliance.cde.config.{Parameters, Field}
 import freechips.rocketchip.devices.tilelink.{BootROMParams, CLINTParams, PLICParams}
 
-case class GhuttleCoreParams(
+case class ShuttleCoreParams(
   nL2TLBEntries: Int = 512,
   nL2TLBWays: Int = 1,
 
@@ -18,13 +18,17 @@ case class GhuttleCoreParams(
   retireWidth: Int = 2,
   fetchWidth: Int = 4,
   fpWidth: Int = 1,
-  override val useBitManip: Boolean = false
+  traceHasWdata: Boolean = false,
 ) extends CoreParams
 {
   require(Seq(4, 8, 16, 32).contains(fetchWidth))
   require(fpWidth <= retireWidth)
   override def minFLen: Int = 16
 
+  val useBitManip: Boolean = false
+  val useBitManipCrypto: Boolean = false
+  val useCryptoNIST: Boolean = false
+  val useCryptoSM: Boolean = false
   val bootFreqHz: BigInt = 0
   val decodeWidth: Int = fetchWidth
   val fpu: Option[freechips.rocketchip.tile.FPUParams] = Some(FPUParams(minFLen = 16,
@@ -58,35 +62,4 @@ case class GhuttleCoreParams(
   val useVM: Boolean = true
   val nPTECacheEntries: Int = 0
   val useHypervisor: Boolean = false
-  val asRocketCoreParams: RocketCoreParams = RocketCoreParams(
-    bootFreqHz = bootFreqHz,
-    useVM = useVM,
-    useUser = useUser,
-    useSupervisor = useSupervisor,
-    useDebug = useDebug,
-    useAtomics = useAtomics,
-    useAtomicsOnlyForIO = useAtomicsOnlyForIO,
-    useCompressed = true,
-    useRVE = useRVE,
-    useSCIE = useSCIE,
-    nLocalInterrupts = nLocalInterrupts,
-    useNMI = useNMI,
-    nBreakpoints = nBreakpoints,
-    useBPWatch = useBPWatch,
-    mcontextWidth = mcontextWidth,
-    scontextWidth = scontextWidth,
-    nPMPs = nPMPs,
-    nPerfCounters = nPerfCounters,
-    haveBasicCounters = haveBasicCounters,
-    haveCFlush = haveCFlush,
-    misaWritable = misaWritable,
-    fastLoadWord = true,
-    fastLoadByte = false,
-    branchPredictionModeCSR = false,
-    clockGate = false,
-    mvendorid = 0,
-    mimpid = 0,
-    mulDiv = mulDiv,
-    fpu = fpu
-  )
 }

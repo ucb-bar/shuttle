@@ -12,19 +12,21 @@ import shuttle.common._
 import shuttle.ifu._
 import shuttle.util._
 
-class GhuttleCore(tile: GhuttleTile)(implicit p: Parameters) extends CoreModule()(p)
+class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule()(p)
   with HasFPUParameters
 {
   val io = IO(new Bundle {
     val hartid = Input(UInt(hartIdLen.W))
     val interrupts = Input(new CoreInterrupts())
-    val imem  = new GhuttleFrontendIO
+    val imem  = new ShuttleFrontendIO
     val dmem = new HellaCacheIO
     val ptw = Flipped(new DatapathPTWIO())
     val rocc = Flipped(new RoCCCoreIO())
     val trace = Vec(coreParams.retireWidth, Output(new TracedInstruction))
     val fcsr_rm = Output(UInt(FPConstants.RM_SZ.W))
   })
+
+  val aluFn = new ALUFN
 
   val debug_tsc_reg = RegInit(0.U(64.W))
   debug_tsc_reg := debug_tsc_reg + 1.U
@@ -39,7 +41,7 @@ class GhuttleCore(tile: GhuttleTile)(implicit p: Parameters) extends CoreModule(
   csr.io.ungated_clock := clock
 
   val fpParams = tileParams.core.fpu.get
-  val fpWidth = tileParams.core.asInstanceOf[GhuttleCoreParams].fpWidth
+  val fpWidth = tileParams.core.asInstanceOf[ShuttleCoreParams].fpWidth
 
   def checkExceptions(x: Seq[(Bool, UInt)]) =
     (x.map(_._1).reduce(_||_), PriorityMux(x))
@@ -72,10 +74,10 @@ class GhuttleCore(tile: GhuttleTile)(implicit p: Parameters) extends CoreModule(
   val fp_bypasses: Seq[Bypass] = fp_wb_bypasses ++ fp_mem_bypasses
   assert(!fp_bypasses.map(b => b.valid && b.can_bypass).reduce(_||_))
 
-  val rrd_uops = Wire(Vec(retireWidth, Valid(new GhuttleUOP)))
-  val ex_uops_reg = Reg(Vec(retireWidth, Valid(new GhuttleUOP)))
-  val mem_uops_reg = Reg(Vec(retireWidth, Valid(new GhuttleUOP)))
-  val wb_uops_reg = Reg(Vec(retireWidth, Valid(new GhuttleUOP)))
+  val rrd_uops = Wire(Vec(retireWidth, Valid(new ShuttleUOP)))
+  val ex_uops_reg = Reg(Vec(retireWidth, Valid(new ShuttleUOP)))
+  val mem_uops_reg = Reg(Vec(retireWidth, Valid(new ShuttleUOP)))
+  val wb_uops_reg = Reg(Vec(retireWidth, Valid(new ShuttleUOP)))
   val wb_uops = WireInit(wb_uops_reg)
 
 
@@ -118,13 +120,6 @@ class GhuttleCore(tile: GhuttleTile)(implicit p: Parameters) extends CoreModule(
   // rrd
   rrd_uops := io.imem.resp
   (rrd_uops zip io.imem.resp).foreach { case (l,r) =>
-    val bitmanipMasks = Seq(
-      ANDN, ORN, XNOR, CLZ, CLZW, CTZ, CTZW,
-      CPOP, CPOPW, MAX, MAXU, MIN, MINU,
-      SEXT_B, SEXT_H, ZEXT_H,
-      ROL, ROLW, ROR, RORI, RORIW, RORW,
-      ORC_B, REV8, PACK)
-    val is_bitmanip = bitmanipMasks.map(m => r.bits.inst === m).reduce(_||_) && usingBitManip.B
     val pipelinedMul = true //pipeline VS iterative
     val decode_table = {
       (if (usingMulDiv) new MDecode(pipelinedMul) +: (xLen > 32).option(new M64Decode(pipelinedMul)).toSeq else Nil) ++:
@@ -134,7 +129,6 @@ class GhuttleCore(tile: GhuttleTile)(implicit p: Parameters) extends CoreModule(
       (if (minFLen == 16) new HDecode +: (xLen > 32).option(new H64Decode).toSeq ++: (fLen >= 64).option(new HDDecode).toSeq else Nil) ++:
       (usingRoCC.option(new RoCCDecode)) ++:
       (if (xLen == 32) new I32Decode else new I64Decode) +:
-      (usingBitManip.option(new BitmanipDecode)) ++:
       (usingVM.option(new SVMDecode)) ++:
       (usingSupervisor.option(new SDecode)) ++:
       (usingDebug.option(new DebugDecode)) ++:
@@ -151,7 +145,6 @@ class GhuttleCore(tile: GhuttleTile)(implicit p: Parameters) extends CoreModule(
 
     l.bits.ctrl.decode(r.bits.inst, decode_table)
     l.bits.fp_ctrl := fp_decode(r.bits.inst)
-    l.bits.is_bitmanip := is_bitmanip
   }
 
   for (i <- 0 until retireWidth) {
@@ -192,7 +185,7 @@ class GhuttleCore(tile: GhuttleTile)(implicit p: Parameters) extends CoreModule(
     rrd_uops(i).bits.xcpt_cause := cause
 
     when (xcpt) {
-      rrd_uops(i).bits.ctrl.alu_fn := ALU.FN_ADD
+      rrd_uops(i).bits.ctrl.alu_fn := aluFn.FN_ADD
       rrd_uops(i).bits.ctrl.alu_dw := DW_XPR
       rrd_uops(i).bits.ctrl.sel_alu1 := A1_RS1
       rrd_uops(i).bits.ctrl.sel_alu2 := A2_ZERO
@@ -234,7 +227,7 @@ class GhuttleCore(tile: GhuttleTile)(implicit p: Parameters) extends CoreModule(
 
   val rrd_stall_data = Wire(Vec(retireWidth, Bool()))
   val rrd_irf_writes = Wire(Vec(retireWidth, Valid(UInt(5.W))))
-  val enableMemALU = coreParams.asInstanceOf[GhuttleCoreParams].enableMemALU && retireWidth > 1
+  val enableMemALU = coreParams.asInstanceOf[ShuttleCoreParams].enableMemALU && retireWidth > 1
   val rrd_mem_p0_can_forward = rrd_uops(0).bits.ctrl.wxd && rrd_uops(0).bits.uses_alu && enableMemALU.B
   for (i <- 0 until retireWidth) {
     val fp_ctrl = rrd_uops(i).bits.fp_ctrl
@@ -333,7 +326,6 @@ class GhuttleCore(tile: GhuttleTile)(implicit p: Parameters) extends CoreModule(
       || uop.xcpt
       || ctrl.mul
       || ctrl.div
-      || uop.is_bitmanip
       || ctrl.rocc
       || uop.uses_fp && (uop.fp_ctrl.div || uop.fp_ctrl.sqrt)
     )
@@ -374,7 +366,7 @@ class GhuttleCore(tile: GhuttleTile)(implicit p: Parameters) extends CoreModule(
     fsboard.foreach(_ := true.B)
   }
 
-  val fp_pipes = Seq.fill(fpWidth) { Module(new GhuttleFPPipe) }
+  val fp_pipes = Seq.fill(fpWidth) { Module(new ShuttleFPPipe) }
 
   val ex_fp_data_hazard = Seq.fill(retireWidth) { WireInit(false.B) }
   for (i <- 0 until retireWidth) {
@@ -415,7 +407,7 @@ class GhuttleCore(tile: GhuttleTile)(implicit p: Parameters) extends CoreModule(
   }
   val ex_fcsr_data_hazard = ex_uops_reg(0).valid && ex_uops_reg(0).bits.csr_en && (fsboard_bsy || mem_bsy || wb_bsy)
 
-  val mulDivParams = tileParams.core.asInstanceOf[GhuttleCoreParams].mulDiv.get
+  val mulDivParams = tileParams.core.asInstanceOf[ShuttleCoreParams].mulDiv.get
   require(mulDivParams.mulUnroll == 0)
 
   val mul = Module(new PipelinedMultiplier(64, 2))
@@ -425,16 +417,6 @@ class GhuttleCore(tile: GhuttleTile)(implicit p: Parameters) extends CoreModule(
   mul.io.req.bits.in1 := ex_uops_reg(0).bits.rs1_data
   mul.io.req.bits.in2 := ex_uops_reg(0).bits.rs2_data
   mul.io.req.bits.tag := ex_uops_reg(0).bits.rd
-
-
-  val bitmanip = Module(new Bitmanip())
-  val imm_bitmanip = ImmGen(ex_uops_reg(0).bits.ctrl.sel_imm, ex_uops_reg(0).bits.inst)
-  bitmanip.io.req.valid := ex_uops_reg(0).valid && ex_uops_reg(0).bits.is_bitmanip && !ex_stall && usingBitManip.B
-  bitmanip.io.req.bits.dw := ex_uops_reg(0).bits.ctrl.alu_dw
-  bitmanip.io.req.bits.fn := Cat(ex_uops_reg(0).bits.ctrl.alu_fn, ex_uops_reg(0).bits.ctrl.mem_cmd(0))
-  bitmanip.io.req.bits.in1 := ex_uops_reg(0).bits.rs1_data
-  bitmanip.io.req.bits.in2 := Mux(ex_uops_reg(0).bits.ctrl.rxs2 === 1.U,
-    ex_uops_reg(0).bits.rs2_data.asUInt, imm_bitmanip.asUInt)
 
 
   val ex_dmem_oh = ex_uops_reg.map({u => u.valid && u.bits.ctrl.mem})
@@ -704,13 +686,6 @@ class GhuttleCore(tile: GhuttleTile)(implicit p: Parameters) extends CoreModule(
   when (wb_uops_reg(0).bits.ctrl.mul) {
     wb_uops(0).bits.wdata.valid := true.B
     wb_uops(0).bits.wdata.bits := mul.io.resp.bits.data
-  }
-
-  if (usingBitManip) {
-    when (wb_uops_reg(0).bits.is_bitmanip) {
-      wb_uops(0).bits.wdata.valid := true.B
-      wb_uops(0).bits.wdata.bits := bitmanip.io.resp.bits
-    }
   }
 
   val wb_rocc_valid = wb_uops_reg(0).valid && wb_uops_reg(0).bits.ctrl.rocc

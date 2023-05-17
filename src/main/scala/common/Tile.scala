@@ -17,24 +17,22 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.prci.ClockSinkParameters
 
-import testchipip.{ExtendedTracedInstruction, WithExtendedTraceport}
-
 import shuttle.ifu._
 import shuttle.exu._
 
-case class GhuttleTileParams(
-  core: GhuttleCoreParams = GhuttleCoreParams(),
+case class ShuttleTileParams(
+  core: ShuttleCoreParams = ShuttleCoreParams(),
   icache: Option[ICacheParams] = Some(ICacheParams(prefetch=true)),
   dcache: Option[DCacheParams] = Some(DCacheParams()),
   trace: Boolean = false,
   name: Option[String] = Some("shuttle_tile"),
   btb: Option[BTBParams] = Some(BTBParams()),
-  hartId: Int = 0) extends InstantiableTileParams[GhuttleTile]
+  hartId: Int = 0) extends InstantiableTileParams[ShuttleTile]
 {
   require(icache.isDefined)
   require(dcache.isDefined)
-  def instantiate(crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters): GhuttleTile = {
-    new GhuttleTile(this, crossing, lookup)
+  def instantiate(crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters): ShuttleTile = {
+    new ShuttleTile(this, crossing, lookup)
   }
 
   val beuAddr: Option[BigInt] = None
@@ -44,16 +42,16 @@ case class GhuttleTileParams(
 }
 
 
-case class GhuttleTileAttachParams(
-  tileParams: GhuttleTileParams,
+case class ShuttleTileAttachParams(
+  tileParams: ShuttleTileParams,
   crossingParams: RocketCrossingParams
 ) extends CanAttachTile {
-  type TileType = GhuttleTile
+  type TileType = ShuttleTile
   val lookup = PriorityMuxHartIdFromSeq(Seq(tileParams))
 }
 
-class GhuttleTile private(
-  val shuttleParams: GhuttleTileParams,
+class ShuttleTile private(
+  val shuttleParams: ShuttleTileParams,
   crossing: ClockCrossingType,
   lookup: LookupByHartIdImpl,
   q: Parameters)
@@ -61,10 +59,9 @@ class GhuttleTile private(
     with HasTileParameters
     with SinksExternalInterrupts
     with SourcesExternalNotifications
-    with WithExtendedTraceport
 {
   // Private constructor ensures altered LazyModule.p is used implicitly
-  def this(params: GhuttleTileParams, crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters) =
+  def this(params: ShuttleTileParams, crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters) =
     this(params, crossing.crossingType, lookup, p)
 
   val intOutwardNode = IntIdentityNode()
@@ -98,7 +95,7 @@ class GhuttleTile private(
   var nDCachePorts = 0
   nDCachePorts += usingPTW.toInt
 
-  val frontend = LazyModule(new GhuttleFrontend(tileParams.icache.get, staticIdForMetadataUseOnly))
+  val frontend = LazyModule(new ShuttleFrontend(tileParams.icache.get, staticIdForMetadataUseOnly))
   tlMasterXbar.node := TLBuffer() := TLWidthWidget(tileParams.icache.get.fetchBytes) := frontend.masterNode
   frontend.resetVectorSinkNode := resetVectorNexusNode
   nPTWPorts += 1
@@ -113,10 +110,10 @@ class GhuttleTile private(
 
   nDCachePorts += 1 /* core */
 
-  override lazy val module = new GhuttleTileModuleImp(this)
+  override lazy val module = new ShuttleTileModuleImp(this)
 }
 
-class GhuttleTileModuleImp(outer: GhuttleTile) extends BaseTileModuleImp(outer)
+class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
 {
   val dcachePorts = ListBuffer[HellaCacheIO]()
   val ptwPorts = ListBuffer(outer.dcache.module.io.ptw)
@@ -126,11 +123,11 @@ class GhuttleTileModuleImp(outer: GhuttleTile) extends BaseTileModuleImp(outer)
     dcachePorts += ptw.io.mem
   }
 
-  val core = Module(new GhuttleCore(outer)(outer.p))
+  val core = Module(new ShuttleCore(outer)(outer.p))
   outer.decodeCoreInterrupts(core.io.interrupts) // Decode the interrupt vector
 
   // Pass through various external constants and reports that were bundle-bridged into the tile
-  outer.extTraceSourceNode.bundle <> core.io.trace
+  outer.traceSourceNode.bundle <> core.io.trace
   core.io.hartid := outer.hartIdSinkNode.bundle
   require(core.io.hartid.getWidth >= outer.hartIdSinkNode.bundle.getWidth,
     s"core hartid wire (${core.io.hartid.getWidth}) truncates external hartid wire (${outer.hartIdSinkNode.bundle.getWidth}b)")
@@ -198,6 +195,6 @@ class GhuttleTileModuleImp(outer: GhuttleTile) extends BaseTileModuleImp(outer)
   require(h == c, s"port list size was $h, core expected $c")
   require(h == o, s"port list size was $h, outer counted $o")
   // TODO figure out how to move the below into their respective mix-ins
-  dcacheArb.io.requestor <> dcachePorts
-  ptw.io.requestor <> ptwPorts
+  dcacheArb.io.requestor <> dcachePorts.toSeq
+  ptw.io.requestor <> ptwPorts.toSeq
 }

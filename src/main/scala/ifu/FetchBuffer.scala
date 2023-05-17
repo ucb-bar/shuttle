@@ -11,26 +11,26 @@ import freechips.rocketchip.rocket.{MStatus, BP, BreakpointUnit}
 import shuttle.common._
 import shuttle.util._
 
-class GhuttleFetchBuffer(implicit p: Parameters) extends CoreModule
+class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
 {
   // This is an approximate heuristic to ensure that
   // this buffer rarely backpresures the frontend
   val numEntries = (retireWidth * 3) + 1
   val io = IO(new Bundle {
-    val enq = Flipped(Decoupled(new GhuttleFetchBundle))
-    val deq = Vec(retireWidth, Decoupled(new GhuttleUOP))
-    val peek = Vec(retireWidth, Valid(new GhuttleUOP))
+    val enq = Flipped(Decoupled(new ShuttleFetchBundle))
+    val deq = Vec(retireWidth, Decoupled(new ShuttleUOP))
+    val peek = Vec(retireWidth, Valid(new ShuttleUOP))
 
     val clear = Input(Bool())
   })
-  val ram = Reg(Vec(numEntries, Valid(new GhuttleUOP)))
+  val ram = Reg(Vec(numEntries, Valid(new ShuttleUOP)))
   val enq_ptr = RegInit(1.U(numEntries.W))
   val deq_ptr = RegInit(1.U(numEntries.W))
   require(numEntries >= fetchWidth)
   io.enq.ready := PopCount(ram.map(_.valid)) +& PopCount(io.enq.bits.mask) <= numEntries.U
 
   // Input microops.
-  val in_uops = Wire(Vec(fetchWidth, Valid(new GhuttleUOP)))
+  val in_uops = Wire(Vec(fetchWidth, Valid(new ShuttleUOP)))
 
   // Step 1: Convert FetchPacket into a vector of MicroOps.
   val lower = Wire(UInt(fetchWidth.W))

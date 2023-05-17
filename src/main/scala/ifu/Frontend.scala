@@ -14,7 +14,7 @@ import freechips.rocketchip.util.property._
 
 import shuttle.common._
 
-trait HasGhuttleFrontendParameters extends HasL1ICacheParameters
+trait HasShuttleFrontendParameters extends HasL1ICacheParameters
 {
   def fetchAlign(addr: UInt) = ~(~addr | (fetchBytes-1).U)
   def blockAlign(addr: UInt) = ~(~addr | (cacheParams.blockBytes-1).U)
@@ -26,8 +26,8 @@ trait HasGhuttleFrontendParameters extends HasL1ICacheParameters
   }
 }
 
-class GhuttleFetchBundle(implicit val p: Parameters) extends Bundle
-  with HasGhuttleFrontendParameters
+class ShuttleFetchBundle(implicit val p: Parameters) extends Bundle
+  with HasShuttleFrontendParameters
   with HasCoreParameters
 {
   val btbParams = tileParams.btb.get
@@ -52,10 +52,10 @@ class GhuttleFetchBundle(implicit val p: Parameters) extends Bundle
 
 
 
-class GhuttleFrontend(val icacheParams: ICacheParams, staticIdForMetadataUseOnly: Int)(implicit p: Parameters) extends LazyModule
+class ShuttleFrontend(val icacheParams: ICacheParams, staticIdForMetadataUseOnly: Int)(implicit p: Parameters) extends LazyModule
 {
-  lazy val module = new GhuttleFrontendModule(this)
-  val icache = LazyModule(new GhuttleICache(icacheParams, staticIdForMetadataUseOnly))
+  lazy val module = new ShuttleFrontendModule(this)
+  val icache = LazyModule(new ShuttleICache(icacheParams, staticIdForMetadataUseOnly))
   val masterNode = icache.masterNode
   val resetVectorSinkNode = BundleBridgeSink[UInt](Some(() =>
     UInt(masterNode.edges.out.head.bundle.addressBits.W)))
@@ -67,7 +67,7 @@ class RASUpdate(implicit p: Parameters) extends CoreBundle()(p) {
   val addr = UInt(vaddrBitsExtended.W)
 }
 
-class GhuttleFrontendIO(implicit p: Parameters) extends CoreBundle()(p) {
+class ShuttleFrontendIO(implicit p: Parameters) extends CoreBundle()(p) {
   val btbParams = tileParams.btb.get
   val redirect_flush = Output(Bool())
   val redirect_val = Output(Bool())
@@ -75,27 +75,27 @@ class GhuttleFrontendIO(implicit p: Parameters) extends CoreBundle()(p) {
   val redirect_ras_head = Output(UInt(log2Ceil(btbParams.nRAS).W))
   val sfence = Valid(new SFenceReq)
   val flush_icache = Output(Bool())
-  val resp = Flipped(Vec(retireWidth, Decoupled(new GhuttleUOP)))
-  val peek = Flipped(Vec(retireWidth, Valid(new GhuttleUOP)))
+  val resp = Flipped(Vec(retireWidth, Decoupled(new ShuttleUOP)))
+  val peek = Flipped(Vec(retireWidth, Valid(new ShuttleUOP)))
 
-  val btb_update = Valid(new GhuttleBTBUpdate)
+  val btb_update = Valid(new ShuttleBTBUpdate)
   val bht_update = Valid(new BHTUpdate)
   val ras_update = Valid(new RASUpdate)
 
 }
 
-class GhuttleFrontendBundle(val outer: GhuttleFrontend) extends CoreBundle()(outer.p)
+class ShuttleFrontendBundle(val outer: ShuttleFrontend) extends CoreBundle()(outer.p)
 {
-  val cpu = Flipped(new GhuttleFrontendIO)
+  val cpu = Flipped(new ShuttleFrontendIO)
   val ptw = new TLBPTWIO()
 }
 
-class GhuttleFrontendModule(outer: GhuttleFrontend) extends LazyModuleImp(outer)
-  with HasGhuttleFrontendParameters
+class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
+  with HasShuttleFrontendParameters
   with HasCoreParameters
   with RISCVConstants
 {
-  val io = IO(new GhuttleFrontendBundle(outer))
+  val io = IO(new ShuttleFrontendBundle(outer))
   val io_reset_vector = outer.resetVectorSinkNode.bundle
   implicit val edge = outer.masterNode.edges.out(0)
   require(fetchWidth*coreInstBytes == outer.icacheParams.fetchBytes)
@@ -106,7 +106,7 @@ class GhuttleFrontendModule(outer: GhuttleFrontend) extends LazyModuleImp(outer)
 
   val tlb = Module(new TLB(true, log2Ceil(fetchBytes), TLBConfig(nTLBSets, nTLBWays)))
   io.ptw <> tlb.io.ptw
-  val btb = Module(new GhuttleBTB)
+  val btb = Module(new ShuttleBTB)
   val ras = Reg(Vec(btbParams.nRAS, UInt(vaddrBitsExtended.W)))
   // TODO add RAS
   btb.io.flush := false.B
@@ -241,7 +241,7 @@ class GhuttleFrontendModule(outer: GhuttleFrontend) extends LazyModuleImp(outer)
   // Tracks if last fetchpacket contained a half-inst
   val f2_prev_is_half = RegInit(false.B)
 
-  val f2_fetch_bundle = Wire(new GhuttleFetchBundle)
+  val f2_fetch_bundle = Wire(new ShuttleFetchBundle)
   f2_fetch_bundle            := DontCare
   f2_fetch_bundle.pc         := s2_vpc
   f2_fetch_bundle.next_pc.valid := f2_do_redirect
@@ -343,7 +343,7 @@ class GhuttleFrontendModule(outer: GhuttleFrontend) extends LazyModuleImp(outer)
   s0_replay_resp := s2_tlb_resp
   s0_replay_ppc  := s2_ppc
 
-  val fb = Module(new GhuttleFetchBuffer)
+  val fb = Module(new ShuttleFetchBuffer)
   fb.io.enq.valid := (s2_valid && !f2_clear &&
     (icache.io.resp.valid || ((s2_tlb_resp.ae.inst || s2_tlb_resp.pf.inst) && !s2_tlb_miss))
   )

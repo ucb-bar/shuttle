@@ -10,14 +10,14 @@ import freechips.rocketchip.diplomacy.{SynchronousCrossing, AsynchronousCrossing
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.tile._
 
-class WithNGhuttleCores(n: Int = 1, retireWidth: Int = 2, overrideIdOffset: Option[Int] = None) extends Config((site, here, up) => {
+class WithNShuttleCores(n: Int = 1, retireWidth: Int = 2, overrideIdOffset: Option[Int] = None) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => {
     val prev = up(TilesLocated(InSubsystem), site)
     val idOffset = overrideIdOffset.getOrElse(prev.size)
       (0 until n).map { i =>
-        GhuttleTileAttachParams(
-          tileParams = GhuttleTileParams(
-            core = GhuttleCoreParams(retireWidth = retireWidth),
+        ShuttleTileAttachParams(
+          tileParams = ShuttleTileParams(
+            core = ShuttleCoreParams(retireWidth = retireWidth),
             btb = Some(BTBParams(nEntries=32)),
             dcache = Some(
               DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=4)
@@ -34,9 +34,9 @@ class WithNGhuttleCores(n: Int = 1, retireWidth: Int = 2, overrideIdOffset: Opti
     case XLen => 64
 })
 
-class WithGhuttleRetireWidth(w: Int) extends Config((site, here, up) => {
+class WithShuttleRetireWidth(w: Int) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
-    case tp: GhuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       core = tp.tileParams.core.copy(retireWidth = w)
     ))
     case other => other
@@ -45,9 +45,9 @@ class WithGhuttleRetireWidth(w: Int) extends Config((site, here, up) => {
 })
 
 
-class WithGhuttleFetchWidth(bytes: Int) extends Config((site, here, up) => {
+class WithShuttleFetchWidth(bytes: Int) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
-    case tp: GhuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       core = tp.tileParams.core.copy(fetchWidth = bytes / 2),
       icache = tp.tileParams.icache.map(_.copy(fetchBytes = bytes))
     ))
@@ -57,7 +57,7 @@ class WithGhuttleFetchWidth(bytes: Int) extends Config((site, here, up) => {
 
 class WithL1ICacheSets(sets: Int) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
-    case tp: GhuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       icache = tp.tileParams.icache.map(_.copy(nSets = sets))
     ))
     case other => other
@@ -66,7 +66,7 @@ class WithL1ICacheSets(sets: Int) extends Config((site, here, up) => {
 
 class WithL1DCacheSets(sets: Int) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
-    case tp: GhuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       dcache = tp.tileParams.dcache.map(_.copy(nSets = sets))
     ))
     case other => other
@@ -75,7 +75,7 @@ class WithL1DCacheSets(sets: Int) extends Config((site, here, up) => {
 
 class WithL1ICacheWays(ways: Int) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
-    case tp: GhuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       icache = tp.tileParams.icache.map(_.copy(nWays = ways))
     ))
     case other => other
@@ -84,7 +84,7 @@ class WithL1ICacheWays(ways: Int) extends Config((site, here, up) => {
 
 class WithL1DCacheWays(ways: Int) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
-    case tp: GhuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       dcache = tp.tileParams.dcache.map(_.copy(nWays = ways))
     ))
     case other => other
@@ -93,25 +93,16 @@ class WithL1DCacheWays(ways: Int) extends Config((site, here, up) => {
 
 class WithL1DCacheMSHRs(n: Int) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
-    case tp: GhuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       dcache = tp.tileParams.dcache.map(_.copy(nMSHRs = n))
     ))
     case other => other
   }
 })
 
-class WithGhuttleBitmanip extends Config((site, here, up) => {
+class WithShuttleFPWidth(w: Int)extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
-    case tp: GhuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
-      core = tp.tileParams.core.copy(useBitManip = true)
-    ))
-    case other => other
-  }
-})
-
-class WithGhuttleFPWidth(w: Int)extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
-    case tp: GhuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       core = tp.tileParams.core.copy(fpWidth = w)
     ))
     case other => other

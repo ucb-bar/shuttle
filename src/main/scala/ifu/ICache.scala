@@ -7,7 +7,6 @@ import chisel3.internal.sourceinfo.{SourceInfo}
 import chisel3.experimental.{chiselName}
 
 import org.chipsalliance.cde.config.{Parameters}
-import freechips.rocketchip.subsystem.{RocketTilesKey}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
@@ -15,12 +14,12 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.util.property._
 import freechips.rocketchip.rocket.{HasL1ICacheParameters, ICacheParams, ICacheErrors, ICacheReq}
 
-class GhuttleICache(
+class ShuttleICache(
   val icacheParams: ICacheParams,
   val staticIdForMetadataUseOnly: Int)(implicit p: Parameters)
     extends LazyModule
 {
-  lazy val module = new GhuttleICacheModule(this)
+  lazy val module = new ShuttleICacheModule(this)
   val masterNode = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1(
     sourceId = IdRange(0, 1 + icacheParams.prefetch.toInt), // 0=refill, 1=hint
     name = s"Core ${staticIdForMetadataUseOnly} ICache")))))
@@ -30,7 +29,7 @@ class GhuttleICache(
 }
 
 
-class GhuttleICacheModule(outer: GhuttleICache) extends LazyModuleImp(outer)
+class ShuttleICacheModule(outer: ShuttleICache) extends LazyModuleImp(outer)
   with HasL1ICacheParameters
 {
   override val cacheParams = outer.icacheParams
@@ -135,7 +134,7 @@ class GhuttleICacheModule(outer: GhuttleICache) extends LazyModuleImp(outer)
       )
   }
 
-  for ((data_array, i) <- data_arrays zipWithIndex) {
+  for ((data_array, i) <- data_arrays.zipWithIndex) {
     def wordMatch(addr: UInt) = addr.extract(log2Ceil(tl_out.d.bits.data.getWidth/8)-1, log2Ceil(wordBits/8)) === i.U
     def row(addr: UInt) = addr(untagBits-1, blockOffBits-log2Ceil(refillCycles))
     val s0_ren = s0_valid && wordMatch(s0_vaddr)
