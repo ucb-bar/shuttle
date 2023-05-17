@@ -17,7 +17,7 @@ case class ShuttleCoreParams(
   enableMemALU: Boolean = true,
   retireWidth: Int = 2,
   fetchWidth: Int = 4,
-  traceHasWdata: Boolean = false,
+  debugROB: Boolean = false
 ) extends CoreParams
 {
   require(Seq(4, 8, 16, 32).contains(fetchWidth))
@@ -60,5 +60,6 @@ case class ShuttleCoreParams(
   val useVM: Boolean = true
   val nPTECacheEntries: Int = 0
   val useHypervisor: Boolean = false
-  val useConditionalZero = true
+  val useConditionalZero = false
+  val traceHasWdata: Boolean = debugROB
 }

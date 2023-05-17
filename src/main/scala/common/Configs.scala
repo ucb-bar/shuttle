@@ -44,7 +44,6 @@ class WithShuttleRetireWidth(w: Int) extends Config((site, here, up) => {
 
 })
 
-
 class WithShuttleFetchWidth(bytes: Int) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
@@ -53,6 +52,16 @@ class WithShuttleFetchWidth(bytes: Int) extends Config((site, here, up) => {
     ))
     case other => other
   }
+})
+
+class WithShuttleDebugROB extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      core = tp.tileParams.core.copy(debugROB = true)
+    ))
+    case other => other
+  }
+
 })
 
 class WithL1ICacheSets(sets: Int) extends Config((site, here, up) => {

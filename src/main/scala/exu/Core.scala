@@ -22,7 +22,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     val dmem = new HellaCacheIO
     val ptw = Flipped(new DatapathPTWIO())
     val rocc = Flipped(new RoCCCoreIO())
-    val trace = Vec(coreParams.retireWidth, Output(new TracedInstruction))
+    val trace = Output(new TraceBundle)
     val fcsr_rm = Output(UInt(FPConstants.RM_SZ.W))
   })
 
@@ -191,6 +191,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       when (io.imem.resp(i).bits.xcpt) {
         rrd_uops(i).bits.ctrl.sel_alu1 := A1_PC
         rrd_uops(i).bits.ctrl.sel_alu2 := Mux(io.imem.resp(i).bits.edge_inst, A2_SIZE, A2_ZERO)
+        when (io.imem.resp(i).bits.edge_inst) { ex_uops_reg(i).bits.rvc := true.B }
       }
     }
   }
@@ -728,7 +729,27 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   io.ptw.ptbr := csr.io.ptbr
   io.ptw.status := csr.io.status
   io.ptw.pmp := csr.io.pmp
-  io.trace := csr.io.trace
+  io.trace.time := csr.io.time
+  io.trace.insns := csr.io.trace
+
+  val useDebugROB = coreParams.asInstanceOf[ShuttleCoreParams].debugROB
+  if (useDebugROB) {
+    val csr_trace_with_wdata = WireInit(csr.io.trace)
+    for (i <- 0 until retireWidth) {
+      csr_trace_with_wdata(i).valid := csr.io.trace(i).valid && !csr.io.trace.take(i).map(_.exception).orR
+      csr_trace_with_wdata(i).wdata.get := wb_uops(i).bits.wdata.bits
+      csr_trace_with_wdata(i).iaddr := wb_uops(i).bits.pc
+      val ctrl = wb_uops(i).bits.ctrl
+      val rd = wb_uops(i).bits.rd
+      DebugROB.pushTrace(clock, reset,
+        io.hartid, csr_trace_with_wdata(i),
+        (ctrl.wfd || (ctrl.wxd && rd =/= 0.U)) && !csr.io.trace(i).exception,
+        ctrl.wxd && wb_uops(i).bits.wdata.valid,
+        rd + Mux(ctrl.wfd, 32.U, 0.U))
+      io.trace.insns(i) := DebugROB.popTrace(clock, reset, io.hartid)
+    }
+  }
+
   csr.io.rw.addr := wb_uops_reg(0).bits.inst(31,20)
   csr.io.rw.cmd := CSR.maskCmd(wb_uops_reg(0).valid && !wb_uops_reg(0).bits.xcpt,
     wb_uops_reg(0).bits.ctrl.csr)
@@ -926,6 +947,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       printf("x%d p%d 0x%x\n", ll_waddr, ll_waddr, ll_wdata)
     }
   }
+  if (useDebugROB)
+    DebugROB.pushWb(clock, reset, io.hartid, ll_wen, ll_waddr, ll_wdata)
 
 
   val fp_load_val = RegNext(io.dmem.resp.valid && io.dmem.resp.bits.has_data && dmem_fpu)
@@ -958,21 +981,25 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     fsboard_set(ll_fp_waddr) := true.B
     assert(!fsboard(ll_fp_waddr))
   }
+  if (useDebugROB)
+    DebugROB.pushWb(clock, reset, io.hartid, ll_fp_wval, ll_fp_waddr + 32.U, ieee(ll_fp_wdata))
 
+  val fp_wdata = box(fp_pipe.io.out.bits.data, fp_pipe.io.out_tag)
+  val fp_ieee_wdata = ieee(fp_wdata)
   when (fp_pipe.io.out.valid) {
-    val wdata = box(fp_pipe.io.out.bits.data, fp_pipe.io.out_tag)
-    val ieee_wdata = ieee(wdata)
     val waddr = fp_pipe.io.out_rd
     when (!usePipelinePrints) {
-      printf("f%d p%d 0x%x\n", waddr, waddr + 32.U, ieee_wdata)
+      printf("f%d p%d 0x%x\n", waddr, waddr + 32.U, fp_ieee_wdata)
     }
-    fregfile(waddr) := wdata
+    fregfile(waddr) := fp_wdata
     fsboard_set(waddr) := true.B
     csr.io.fcsr_flags.valid := true.B
     csr.io.set_fs_dirty.foreach(_ := true.B)
     csr_fcsr_flags(2) := fp_pipe.io.out.bits.exc
     assert(!fsboard(waddr))
   }
+  if (useDebugROB)
+    DebugROB.pushWb(clock, reset, io.hartid, fp_pipe.io.out.valid, fp_pipe.io.out_rd + 32.U, fp_ieee_wdata)
 
 
   for (i <- 0 until retireWidth) {
