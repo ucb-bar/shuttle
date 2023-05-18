@@ -647,7 +647,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   for (t <- floatTypes) {
     val tag = wb_fp_divsqrt_ctrl.typeTagOut
     val divSqrt = Module(new hardfloat.DivSqrtRecFN_small(t.exp, t.sig, 0))
-    divSqrt.io.inValid := wb_uops_reg(0).valid && tag === typeTag(t).U && wb_fp_divsqrt_valid
+    divSqrt.io.inValid := wb_uops_reg(0).valid && tag === typeTag(t).U && wb_fp_divsqrt_valid && !divSqrt_val
     divSqrt.io.sqrtOp := wb_fp_divsqrt_ctrl.sqrt
     divSqrt.io.a := maxType.unsafeConvert(wb_uops_reg(0).bits.fdivin.in1, t)
     divSqrt.io.b := maxType.unsafeConvert(wb_uops_reg(0).bits.fdivin.in2, t)
