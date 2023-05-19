@@ -421,7 +421,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   val ex_dmem_oh = ex_uops_reg.map({u => u.valid && u.bits.ctrl.mem})
   val ex_dmem_uop = Mux1H(ex_dmem_oh, ex_uops_reg)
   val ex_dmem_addrs = Wire(Vec(retireWidth, UInt()))
-  io.dmem.req.valid := ex_dmem_oh.reduce(_||_)
+  io.dmem.req.valid := ex_dmem_oh.reduce(_||_) && !ex_dmem_uop.bits.xcpt
   io.dmem.req.bits.tag := Cat(ex_dmem_uop.bits.rd, ex_dmem_uop.bits.ctrl.fp)
   io.dmem.req.bits.cmd := ex_dmem_uop.bits.ctrl.mem_cmd
   io.dmem.req.bits.size := ex_dmem_uop.bits.mem_size
