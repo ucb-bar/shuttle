@@ -948,7 +948,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     }
   }
   if (useDebugROB)
-    DebugROB.pushWb(clock, reset, io.hartid, ll_wen, ll_waddr, ll_wdata)
+    DebugROB.pushWb(clock, reset, io.hartid, ll_wen && ll_waddr =/= 0.U, ll_waddr, ll_wdata)
 
 
   val fp_load_val = RegNext(io.dmem.resp.valid && io.dmem.resp.bits.has_data && dmem_fpu)
