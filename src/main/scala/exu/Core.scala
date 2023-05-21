@@ -671,7 +671,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
 
   val div = Module(new MulDiv(mulDivParams, width=64))
   div.io.kill := false.B
-  div.io.req.valid := wb_uops_reg(0).valid && wb_uops_reg(0).bits.ctrl.div
+  div.io.req.valid := wb_uops_reg(0).valid && wb_uops_reg(0).bits.ctrl.div && !wb_uops_reg(0).bits.xcpt
   div.io.req.bits.dw := wb_uops_reg(0).bits.ctrl.alu_dw
   div.io.req.bits.fn := wb_uops_reg(0).bits.ctrl.alu_fn
   div.io.req.bits.in1 := wb_uops_reg(0).bits.rs1_data
