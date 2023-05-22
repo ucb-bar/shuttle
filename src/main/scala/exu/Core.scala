@@ -12,6 +12,13 @@ import shuttle.common._
 import shuttle.ifu._
 import shuttle.util._
 
+class ShuttleCustomCSRs(implicit p: Parameters) extends freechips.rocketchip.tile.CustomCSRs {
+  def marchid = CustomCSR.constant(CSRs.marchid, BigInt(34))
+
+  override def decls: Seq[CustomCSR] = super.decls :+ marchid
+}
+
+
 class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule()(p)
   with HasFPUParameters
 {
@@ -36,7 +43,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
 
   // EventSet can't handle empty
   val events = new EventSets(Seq(new EventSet((mask, hit) => false.B, Seq(("placeholder", () => false.B)))))
-  val csr = Module(new CSRFile(perfEventSets=events))
+  val csr = Module(new CSRFile(events, (new ShuttleCustomCSRs).decls))
   csr.io := DontCare
   csr.io.ungated_clock := clock
 
