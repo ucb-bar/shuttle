@@ -90,6 +90,9 @@ class ShuttleTile private(
 
   roccs.map(_.atlNode).foreach { atl => tlMasterXbar.node :=* atl }
   roccs.map(_.tlNode).foreach { tl => tlOtherMastersNode :=* tl }
+  val roccCSRs = roccs.map(_.roccCSRs)
+  require(roccCSRs.flatten.map(_.id).toSet.size == roccCSRs.flatten.size,
+    "LazyRoCC instantiations require overlapping CSRs")
 
   var nPTWPorts = 1
   var nDCachePorts = 0
@@ -177,6 +180,8 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
     core.io.rocc.resp <> respArb.io.out
     core.io.rocc.busy <> (cmdRouter.io.busy || outer.roccs.map(_.module.io.busy).reduce(_ || _))
     core.io.rocc.interrupt := outer.roccs.map(_.module.io.interrupt).reduce(_ || _)
+    val roccCSRIOs = outer.roccs.map(_.module.io.csrs)
+    (core.io.rocc.csrs zip roccCSRIOs.flatten).foreach { t => t._2 := t._1 }
   }
 
 

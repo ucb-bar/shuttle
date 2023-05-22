@@ -43,7 +43,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
 
   // EventSet can't handle empty
   val events = new EventSets(Seq(new EventSet((mask, hit) => false.B, Seq(("placeholder", () => false.B)))))
-  val csr = Module(new CSRFile(events, (new ShuttleCustomCSRs).decls))
+  val csr = Module(new CSRFile(events, (new ShuttleCustomCSRs).decls, tile.roccCSRs.flatten))
   csr.io := DontCare
   csr.io.ungated_clock := clock
 
@@ -698,6 +698,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   val wb_rocc_uop = wb_uops_reg(0)
   io.rocc.cmd.valid := false.B
   io.rocc.cmd.bits := DontCare
+  io.rocc.csrs := csr.io.roccCSRs
   if (usingRoCC) {
     io.rocc.cmd.valid := wb_rocc_valid
     io.rocc.cmd.bits.status := csr.io.status
