@@ -254,11 +254,11 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
 
   def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
 
-  def isJALR(exp_inst: UInt) = exp_inst(6,0) === Instructions.JALR.value.asUInt()(6,0)
-  def isJump(exp_inst: UInt) = exp_inst(6,0) === Instructions.JAL.value.asUInt()(6,0)
+  def isJALR(exp_inst: UInt) = exp_inst(6,0) === Instructions.JALR.value.asUInt(6,0)
+  def isJump(exp_inst: UInt) = exp_inst(6,0) === Instructions.JAL.value.asUInt(6,0)
   def isCall(exp_inst: UInt) = (isJALR(exp_inst) || isJump(exp_inst)) && exp_inst(7)
   def isRet(exp_inst: UInt)  = isJALR(exp_inst) && !exp_inst(7) && BitPat("b00?01") === exp_inst(19,15)
-  def isBr(exp_inst: UInt)  = exp_inst(6,0) === Instructions.BEQ.value.asUInt()(6,0)
+  def isBr(exp_inst: UInt)  = exp_inst(6,0) === Instructions.BEQ.value.asUInt(6,0)
 
   val icache_data  = icache.io.resp.bits
   var redir_found = false.B
