@@ -45,6 +45,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   val events = new EventSets(Seq(new EventSet((mask, hit) => false.B, Seq(("placeholder", () => false.B)))))
   val csr = Module(new CSRFile(events, (new ShuttleCustomCSRs).decls, tile.roccCSRs.flatten))
   csr.io := DontCare
+  csr.io.customCSRs.foreach { c => c.set := false.B; c.sdata := DontCare }
   csr.io.ungated_clock := clock
 
   val fpParams = tileParams.core.fpu.get
@@ -698,7 +699,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   val wb_rocc_uop = wb_uops_reg(0)
   io.rocc.cmd.valid := false.B
   io.rocc.cmd.bits := DontCare
-  io.rocc.csrs := csr.io.roccCSRs
+  io.rocc.csrs <> csr.io.roccCSRs
   if (usingRoCC) {
     io.rocc.cmd.valid := wb_rocc_valid
     io.rocc.cmd.bits.status := csr.io.status
@@ -765,6 +766,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   when (wb_uops_reg(0).bits.ctrl.csr =/= CSR.N) {
     wb_uops(0).bits.wdata.valid := true.B
     wb_uops(0).bits.wdata.bits := csr.io.rw.rdata
+    when (csr.io.rw_stall) { wb_uops(0).bits.needs_replay := true.B }
   }
 
   when (wb_uops_reg(0).valid && !wb_uops_reg(0).bits.xcpt && !wb_uops_reg(0).bits.needs_replay && wb_uops_reg(0).bits.ctrl.fence_i) {
