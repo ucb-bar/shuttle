@@ -123,6 +123,7 @@ class ShuttleICacheModule(outer: ShuttleICache) extends LazyModuleImp(outer)
 
   require(tl_out.d.bits.data.getWidth % wordBits == 0)
 
+  override val refillCycles = cacheBlockBytes * 8 / tl_out.d.bits.data.getWidth
   val data_arrays = Seq.tabulate(tl_out.d.bits.data.getWidth / wordBits) {
     i =>
       DescribedSRAM(

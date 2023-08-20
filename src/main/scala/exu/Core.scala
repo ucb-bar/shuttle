@@ -163,7 +163,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     val uop = rrd_uops(i).bits
     val ctrl = uop.ctrl
     val inst = uop.inst
-    val illegal_rm = inst(14,12).isOneOf(5.U, 6.U) || inst(14,12) === 7.U && io.fcsr_rm >= 5.U
+    val illegal_rm = inst(14,12).isOneOf(5.U, 6.U) || inst(14,12) === 7.U && csr.io.fcsr_rm >= 5.U
     val fp_illegal = csr.io.decode(i).fp_illegal || illegal_rm
     val csr_en = uop.csr_en
     val csr_ren = uop.csr_ren
@@ -430,6 +430,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   val ex_dmem_uop = Mux1H(ex_dmem_oh, ex_uops_reg)
   val ex_dmem_addrs = Wire(Vec(retireWidth, UInt()))
   io.dmem.req.valid := ex_dmem_oh.reduce(_||_) && !ex_dmem_uop.bits.xcpt
+  io.dmem.req.bits := DontCare
   io.dmem.req.bits.tag := Cat(ex_dmem_uop.bits.rd, ex_dmem_uop.bits.ctrl.fp)
   io.dmem.req.bits.cmd := ex_dmem_uop.bits.ctrl.mem_cmd
   io.dmem.req.bits.size := ex_dmem_uop.bits.mem_size
@@ -536,6 +537,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   when (!mem_brjmp_uop.btb_resp.valid) {
     io.imem.btb_update.bits.prediction.entry := tileParams.btb.get.nEntries.U
   }
+  io.imem.btb_update.bits.taken := DontCare
 
   io.imem.bht_update.valid := mem_brjmp_val
   io.imem.bht_update.bits.pc := io.imem.btb_update.bits.pc
@@ -548,15 +550,19 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   io.imem.ras_update.bits.head := Mux(mem_brjmp_uop.ras_head === (mem_brjmp_uop.nRAS-1).U, 0.U, mem_brjmp_uop.ras_head + 1.U)
   io.imem.ras_update.bits.addr := mem_brjmp_uop.wdata.bits
 
+  io.imem.redirect_pc := mem_brjmp_npc
+  io.imem.redirect_ras_head := Mux(mem_brjmp_call, Mux(mem_brjmp_uop.ras_head === (mem_brjmp_uop.nRAS-1).U, 0.U, mem_brjmp_uop.ras_head + 1.U),
+    Mux(mem_brjmp_ret, Mux(mem_brjmp_uop.ras_head === 0.U, (mem_brjmp_uop.nRAS-1).U, mem_brjmp_uop.ras_head - 1.U), mem_brjmp_uop.ras_head))
+
   when (mem_brjmp_val && mem_brjmp_mispredict) {
     flush_rrd_ex := true.B
     io.imem.redirect_val := true.B
     io.imem.redirect_flush := true.B
-    io.imem.redirect_pc := mem_brjmp_npc
-    io.imem.redirect_ras_head := Mux(mem_brjmp_call, Mux(mem_brjmp_uop.ras_head === (mem_brjmp_uop.nRAS-1).U, 0.U, mem_brjmp_uop.ras_head + 1.U),
-      Mux(mem_brjmp_ret, Mux(mem_brjmp_uop.ras_head === 0.U, (mem_brjmp_uop.nRAS-1).U, mem_brjmp_uop.ras_head - 1.U), mem_brjmp_uop.ras_head))
   }
 
+  io.dmem.keep_clock_enabled := true.B
+  io.dmem.s1_data.data := mem_uops_reg(0).bits.rs2_data
+  io.dmem.s1_data.mask := DontCare
   for (i <- 0 until retireWidth) {
     val uop = mem_uops_reg(i).bits
     val ctrl = uop.ctrl
@@ -699,7 +705,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   val wb_rocc_uop = wb_uops_reg(0)
   io.rocc.cmd.valid := false.B
   io.rocc.cmd.bits := DontCare
+  io.rocc.mem := DontCare
   io.rocc.csrs <> csr.io.roccCSRs
+  io.rocc.exception := false.B
   if (usingRoCC) {
     io.rocc.cmd.valid := wb_rocc_valid
     io.rocc.cmd.bits.status := csr.io.status
@@ -738,8 +746,13 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   io.ptw.ptbr := csr.io.ptbr
   io.ptw.status := csr.io.status
   io.ptw.pmp := csr.io.pmp
+  io.ptw.hstatus := csr.io.hstatus
+  io.ptw.gstatus := csr.io.gstatus
+  io.ptw.hgatp := csr.io.hgatp
+  io.ptw.vsatp := csr.io.vsatp
   io.trace.time := csr.io.time
   io.trace.insns := csr.io.trace
+  io.fcsr_rm := csr.io.fcsr_rm
 
   val useDebugROB = coreParams.asInstanceOf[ShuttleCoreParams].debugROB
   if (useDebugROB) {
@@ -880,16 +893,15 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
 
   io.imem.sfence.valid := false.B
   io.ptw.sfence := io.imem.sfence
-
+  io.imem.sfence.bits.rs1 := wb_uops_reg(0).bits.mem_size(0)
+  io.imem.sfence.bits.rs2 := wb_uops_reg(0).bits.mem_size(1)
+  io.imem.sfence.bits.addr := wb_uops_reg(0).bits.wdata.bits
+  io.imem.sfence.bits.asid := wb_uops_reg(0).bits.rs2_data
+  io.imem.sfence.bits.hv := wb_uops_reg(0).bits.ctrl.mem_cmd === M_HFENCEV
+  io.imem.sfence.bits.hg := wb_uops_reg(0).bits.ctrl.mem_cmd === M_HFENCEG
 
   when (wb_uops(0).valid && wb_uops(0).bits.sfence && !wb_uops(0).bits.xcpt && !wb_uops(0).bits.needs_replay) {
     io.imem.sfence.valid := true.B
-    io.imem.sfence.bits.rs1 := wb_uops_reg(0).bits.mem_size(0)
-    io.imem.sfence.bits.rs2 := wb_uops_reg(0).bits.mem_size(1)
-    io.imem.sfence.bits.addr := wb_uops_reg(0).bits.wdata.bits
-    io.imem.sfence.bits.asid := wb_uops_reg(0).bits.rs2_data
-    io.imem.sfence.bits.hv := wb_uops_reg(0).bits.ctrl.mem_cmd === M_HFENCEV
-    io.imem.sfence.bits.hg := wb_uops_reg(0).bits.ctrl.mem_cmd === M_HFENCEG
   }
 
   for (i <- (0 until retireWidth).reverse) {
