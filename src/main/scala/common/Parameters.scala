@@ -62,4 +62,5 @@ case class ShuttleCoreParams(
   val useHypervisor: Boolean = false
   val useConditionalZero = false
   val traceHasWdata: Boolean = debugROB
+  val useVector: Boolean = false
 }
