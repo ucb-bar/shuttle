@@ -24,7 +24,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
 {
   val io = IO(new Bundle {
     val hartid = Input(UInt(hartIdLen.W))
-    val interrupts = Input(new CoreInterrupts())
+    val interrupts = Input(new CoreInterrupts(false))
     val imem  = new ShuttleFrontendIO
     val dmem = new HellaCacheIO
     val ptw = Flipped(new DatapathPTWIO())
