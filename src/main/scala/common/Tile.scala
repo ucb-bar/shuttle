@@ -158,7 +158,7 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
         val fpu = Module(new FPU(outer.tileParams.core.fpu.get)(outer.p))
         fpu.io := DontCare
         fpu.io.fcsr_rm := core.io.fcsr_rm
-        fpu.io.dmem_resp_val := false.B
+        fpu.io.ll_resp_val := false.B
         fpu.io.valid := false.B
         fpu.io.killx := false.B
         fpu.io.killm := false.B
