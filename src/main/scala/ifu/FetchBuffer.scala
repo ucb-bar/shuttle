@@ -80,7 +80,7 @@ class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
     }
     enq_oh = Mux(in_uops(i).valid, rotateLeft(enq_oh), enq_oh)
   }
-  when (io.enq.fire()) {
+  when (io.enq.fire) {
     enq_ptr := rotateLeft(enq_ptr, PopCount(io.enq.bits.mask))
     for (i <- 0 until numEntries) {
       when (!ram(i).valid) {
@@ -95,7 +95,7 @@ class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
     val out_uop = Mux1H(deq_oh, ram)
     io.deq(i).valid := out_uop.valid
     io.deq(i).bits := out_uop.bits
-    deq_mask = Mux(io.deq(i).fire(), deq_mask | deq_oh, deq_mask)
+    deq_mask = Mux(io.deq(i).fire, deq_mask | deq_oh, deq_mask)
     deq_oh = rotateLeft(deq_oh)
   }
   for (i <- 0 until retireWidth) {
@@ -109,7 +109,7 @@ class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
       ram(i).valid := false.B
     }
   }
-  deq_ptr := rotateLeft(deq_ptr, PopCount(io.deq.map(_.fire())))
+  deq_ptr := rotateLeft(deq_ptr, PopCount(io.deq.map(_.fire)))
   for (i <- 1 until retireWidth) {
     when (io.deq(i).ready) {
       assert(io.deq.take(i).map(_.ready).reduce(_&&_))

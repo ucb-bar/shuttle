@@ -3,7 +3,6 @@ package shuttle.ifu
 import chisel3._
 import chisel3.util._
 import chisel3.util.random._
-import chisel3.internal.sourceinfo.{SourceInfo}
 
 import org.chipsalliance.cde.config.{Parameters}
 import freechips.rocketchip.diplomacy._
@@ -46,7 +45,7 @@ class ShuttleICacheModule(outer: ShuttleICache) extends LazyModuleImp(outer)
   require(isPow2(nSets) && isPow2(nWays))
   require(usingVM && pgIdxBits >= untagBits)
 
-  val s0_valid = io.req.fire()
+  val s0_valid = io.req.fire
   val s0_vaddr = io.req.bits
 
   val s1_valid = RegInit(false.B)
@@ -59,7 +58,7 @@ class ShuttleICacheModule(outer: ShuttleICache) extends LazyModuleImp(outer)
   val invalidated = Reg(Bool())
   val refill_valid = RegInit(false.B)
   val send_hint = RegInit(false.B)
-  val refill_fire = tl_out.a.fire() && !send_hint
+  val refill_fire = tl_out.a.fire && !send_hint
   val hint_outstanding = RegInit(false.B)
   val s2_miss = s2_valid && !s2_hit && !io.s2_kill
   val s1_can_request_refill = !(s2_miss || refill_valid)
@@ -68,7 +67,7 @@ class ShuttleICacheModule(outer: ShuttleICache) extends LazyModuleImp(outer)
   val refill_vaddr = RegEnable(s1_vaddr, s1_valid && s1_can_request_refill)
   val refill_tag = refill_paddr >> pgUntagBits
   val refill_idx = index(refill_vaddr, refill_paddr)
-  val refill_one_beat = tl_out.d.fire() && edge_out.hasData(tl_out.d.bits)
+  val refill_one_beat = tl_out.d.fire && edge_out.hasData(tl_out.d.bits)
 
   io.req.ready := !refill_one_beat
   s1_valid := s0_valid
@@ -176,7 +175,7 @@ class ShuttleICacheModule(outer: ShuttleICache) extends LazyModuleImp(outer)
 
   if (cacheParams.prefetch) {
     val (crosses_page, next_block) = Split(refill_paddr(pgIdxBits-1, blockOffBits) +& 1.U, pgIdxBits-blockOffBits)
-    when (tl_out.a.fire()) {
+    when (tl_out.a.fire) {
       send_hint := !hint_outstanding && !crosses_page
       when (send_hint) {
         send_hint := false.B
@@ -186,7 +185,7 @@ class ShuttleICacheModule(outer: ShuttleICache) extends LazyModuleImp(outer)
     when (refill_done) {
       send_hint := false.B
     }
-    when (tl_out.d.fire() && !refill_one_beat) {
+    when (tl_out.d.fire && !refill_one_beat) {
       hint_outstanding := false.B
     }
 
