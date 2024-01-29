@@ -24,7 +24,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
 {
   val io = IO(new Bundle {
     val hartid = Input(UInt(hartIdLen.W))
-    val interrupts = Input(new CoreInterrupts())
+    val interrupts = Input(new CoreInterrupts(false))
     val imem  = new ShuttleFrontendIO
     val dmem = new HellaCacheIO
     val ptw = Flipped(new DatapathPTWIO())
@@ -444,7 +444,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   io.dmem.s2_kill := false.B
 
   for (i <- 0 until retireWidth) {
-    when (RegNext(io.dmem.req.fire() && ex_dmem_oh(i) && (ex_stall || flush_rrd_ex))) {
+    when (RegNext(io.dmem.req.fire && ex_dmem_oh(i) && (ex_stall || flush_rrd_ex))) {
       io.dmem.s1_kill := true.B
     }
   }
@@ -456,11 +456,11 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     val imm = ImmGen(ctrl.sel_imm, uop.inst)
     val sel_alu1 = WireInit(ctrl.sel_alu1)
     val sel_alu2 = WireInit(ctrl.sel_alu2)
-    val ex_op1 = MuxLookup(sel_alu1, 0.S, Seq(
+    val ex_op1 = MuxLookup(sel_alu1, 0.S)(Seq(
       A1_RS1 -> uop.rs1_data.asSInt,
       A1_PC -> uop.pc.asSInt
     ))
-    val ex_op2 = MuxLookup(sel_alu2, 0.S, Seq(
+    val ex_op2 = MuxLookup(sel_alu2, 0.S)(Seq(
       A2_RS2 -> uop.rs2_data.asSInt,
       A2_IMM -> imm,
       A2_SIZE -> Mux(uop.rvc, 2.S, 4.S)
@@ -614,11 +614,11 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       val rs2_data = Mux(uop.rs2 === mem_uops_reg(0).bits.rd && mem_uops_reg(0).valid && mem_uops_reg(0).bits.ctrl.wxd,
         mem_uops_reg(0).bits.wdata.bits,
         uop.rs2_data)
-      val ex_op1 = MuxLookup(sel_alu1, 0.S, Seq(
+      val ex_op1 = MuxLookup(sel_alu1, 0.S)(Seq(
         A1_RS1 -> rs1_data.asSInt,
         A1_PC -> uop.pc.asSInt
       ))
-      val ex_op2 = MuxLookup(sel_alu2, 0.S, Seq(
+      val ex_op2 = MuxLookup(sel_alu2, 0.S)(Seq(
         A2_RS2 -> rs2_data.asSInt,
         A2_IMM -> imm,
         A2_SIZE -> Mux(uop.rvc, 2.S, 4.S)

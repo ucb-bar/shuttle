@@ -10,10 +10,10 @@ import freechips.rocketchip.diplomacy.{SynchronousCrossing, AsynchronousCrossing
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.tile._
 
-class WithNShuttleCores(n: Int = 1, retireWidth: Int = 2, overrideIdOffset: Option[Int] = None) extends Config((site, here, up) => {
+class WithNShuttleCores(n: Int = 1, retireWidth: Int = 2) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => {
     val prev = up(TilesLocated(InSubsystem), site)
-    val idOffset = overrideIdOffset.getOrElse(prev.size)
+    val idOffset = up(NumTiles)
       (0 until n).map { i =>
         ShuttleTileAttachParams(
           tileParams = ShuttleTileParams(
@@ -25,13 +25,14 @@ class WithNShuttleCores(n: Int = 1, retireWidth: Int = 2, overrideIdOffset: Opti
             icache = Some(
               ICacheParams(rowBits = -1, nSets=64, nWays=8, fetchBytes=2*4)
             ),
-            hartId = i + idOffset
+            tileId = i + idOffset
           ),
           crossingParams = RocketCrossingParams()
         )
       } ++ prev
     }
-    case XLen => 64
+  case XLen => 64
+  case NumTiles => up(NumTiles) + n
 })
 
 class WithShuttleRetireWidth(w: Int) extends Config((site, here, up) => {

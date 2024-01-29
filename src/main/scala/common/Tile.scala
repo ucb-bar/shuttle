@@ -27,11 +27,11 @@ case class ShuttleTileParams(
   trace: Boolean = false,
   name: Option[String] = Some("shuttle_tile"),
   btb: Option[BTBParams] = Some(BTBParams()),
-  hartId: Int = 0) extends InstantiableTileParams[ShuttleTile]
+  tileId: Int = 0) extends InstantiableTileParams[ShuttleTile]
 {
   require(icache.isDefined)
   require(dcache.isDefined)
-  def instantiate(crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters): ShuttleTile = {
+  def instantiate(crossing: HierarchicalElementCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters): ShuttleTile = {
     new ShuttleTile(this, crossing, lookup)
   }
 
@@ -39,6 +39,8 @@ case class ShuttleTileParams(
   val blockerCtrlAddr: Option[BigInt] = None
   val boundaryBuffers: Boolean = false // if synthesized with hierarchical PnR, cut feed-throughs?
   val clockSinkParams: ClockSinkParameters = ClockSinkParameters()
+  val baseName = name.getOrElse("shuttle_tile")
+  val uniqueName = s"${baseName}_$tileId"
 }
 
 
@@ -61,10 +63,10 @@ class ShuttleTile private(
     with SourcesExternalNotifications
 {
   // Private constructor ensures altered LazyModule.p is used implicitly
-  def this(params: ShuttleTileParams, crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters) =
+  def this(params: ShuttleTileParams, crossing: HierarchicalElementCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters) =
     this(params, crossing.crossingType, lookup, p)
 
-  val intOutwardNode = IntIdentityNode()
+  val intOutwardNode = None
   val masterNode = visibilityNode
   val slaveNode = TLIdentityNode()
 
@@ -84,7 +86,7 @@ class ShuttleTile private(
   }
 
   ResourceBinding {
-    Resource(cpuDevice, "reg").bind(ResourceAddress(staticIdForMetadataUseOnly))
+    Resource(cpuDevice, "reg").bind(ResourceAddress(tileId))
   }
   val roccs = p(BuildRoCC).map(_(p))
 
@@ -98,7 +100,7 @@ class ShuttleTile private(
   var nDCachePorts = 0
   nDCachePorts += usingPTW.toInt
 
-  val frontend = LazyModule(new ShuttleFrontend(tileParams.icache.get, staticIdForMetadataUseOnly))
+  val frontend = LazyModule(new ShuttleFrontend(tileParams.icache.get, tileId))
   tlMasterXbar.node := TLBuffer() := TLWidthWidget(tileParams.icache.get.fetchBytes) := frontend.masterNode
   frontend.resetVectorSinkNode := resetVectorNexusNode
   nPTWPorts += 1
