@@ -98,8 +98,6 @@ class ShuttleTile private(
     "LazyRoCC instantiations require overlapping CSRs")
 
   var nPTWPorts = 1
-  var nDCachePorts = 0
-  nDCachePorts += usingPTW.toInt
 
   val frontend = LazyModule(new ShuttleFrontend(tileParams.icache.get, tileId))
   tlMasterXbar.node := TLBuffer() := TLWidthWidget(tileParams.icache.get.fetchBytes) := frontend.masterNode
@@ -107,24 +105,37 @@ class ShuttleTile private(
   nPTWPorts += 1
 
   nPTWPorts += roccs.map(_.nPTWPorts).sum
-  nDCachePorts += roccs.size
 
   val dcache = LazyModule(new ShuttleDCache(tileId, ShuttleDCacheParams())(p))
   tlMasterXbar.node := TLBuffer() := dcache.node
-
-  nDCachePorts += 1 /* core */
 
   override lazy val module = new ShuttleTileModuleImp(this)
 }
 
 class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
 {
-  val dcachePorts = ListBuffer[HellaCacheIO]()
+  val dcachePorts = Wire(Vec(2, new ShuttleDCacheIO))
   val ptwPorts = ListBuffer(outer.dcache.module.io.ptw)
 
   val ptw = Module(new PTW(outer.nPTWPorts)(outer.dcache.node.edges.out(0), outer.p))
   if (outer.usingPTW) {
-    dcachePorts += ptw.io.mem
+    dcachePorts(0).req <> ptw.io.mem.req
+    dcachePorts(0).s1_kill := ptw.io.mem.s1_kill
+    dcachePorts(0).s1_data := ptw.io.mem.s1_data
+    ptw.io.mem.s2_nack := dcachePorts(0).s2_nack
+    dcachePorts(0).s2_kill := ptw.io.mem.s2_kill
+    ptw.io.mem.s2_paddr := dcachePorts(0).s2_paddr
+    ptw.io.mem.resp <> dcachePorts(0).resp
+    ptw.io.mem.s2_xcpt := dcachePorts(0).s2_xcpt
+    ptw.io.mem.ordered := dcachePorts(0).ordered
+    dcachePorts(0).keep_clock_enabled := ptw.io.mem.keep_clock_enabled
+    ptw.io.mem.clock_enabled := dcachePorts(0).clock_enabled
+    ptw.io.mem.perf := dcachePorts(0).perf
+    ptw.io.mem.s2_nack_cause_raw := false.B
+    ptw.io.mem.s2_uncached := false.B
+    ptw.io.mem.replay_next := false.B
+    ptw.io.mem.s2_gpa := false.B
+    ptw.io.mem.s2_gpa_is_pte := false.B
   }
 
   val core = Module(new ShuttleCore(outer)(outer.p))
@@ -138,7 +149,7 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
 
   // Connect the core pipeline to other intra-tile modules
   outer.frontend.module.io.cpu <> core.io.imem
-  dcachePorts += core.io.dmem // TODO outer.dcachePorts += () => module.core.io.dmem ??
+  dcachePorts(1) <> core.io.dmem // TODO outer.dcachePorts += () => module.core.io.dmem ??
 
   // Connect the coprocessor interfaces
   core.io.rocc := DontCare
@@ -149,9 +160,9 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
       outer.roccs.zipWithIndex.foreach { case (rocc, i) =>
         rocc.module.io.ptw ++=: ptwPorts
         rocc.module.io.cmd <> cmdRouter.io.out(i)
-        val dcIF = Module(new SimpleHellaCacheIF()(outer.p))
-        dcIF.io.requestor <> rocc.module.io.mem
-        dcachePorts += dcIF.io.cache
+        rocc.module.io.mem := DontCare
+        rocc.module.io.mem.req.ready := false.B
+        assert(!rocc.module.io.mem.req.valid)
         respArb.io.in(i) <> Queue(rocc.module.io.resp)
       }
       val nFPUPorts = outer.roccs.count(_.usesFPU)
@@ -186,21 +197,12 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
   }
 
 
-  val dcacheArb = Module(new HellaCacheArbiter(outer.nDCachePorts)(outer.p))
+  val dcacheArb = Module(new ShuttleDCacheArbiter(2)(outer.p))
   outer.dcache.module.io.cpu <> dcacheArb.io.mem
 
   ptwPorts += outer.frontend.module.io.ptw
-
-
   core.io.ptw <> ptw.io.dpath
 
-  // TODO eliminate this redundancy
-  val h = dcachePorts.size
-  val c = core.dcacheArbPorts
-  val o = outer.nDCachePorts
-  require(h == c, s"port list size was $h, core expected $c")
-  require(h == o, s"port list size was $h, outer counted $o")
-  // TODO figure out how to move the below into their respective mix-ins
-  dcacheArb.io.requestor <> dcachePorts.toSeq
+  dcacheArb.io.requestor <> dcachePorts
   ptw.io.requestor <> ptwPorts.toSeq
 }

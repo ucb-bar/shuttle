@@ -72,12 +72,30 @@ class ShuttleDCache(tileId: Int, val params: ShuttleDCacheParams)(implicit p: Pa
   override lazy val module = new ShuttleDCacheModule(this)
 }
 
+class ShuttleDCacheIO(implicit p: Parameters) extends CoreBundle()(p) {
+  val req = Decoupled(new HellaCacheReq)
+  val s1_kill = Output(Bool()) // kill previous cycle's req
+  val s1_data = Output(new HellaCacheWriteData()) // data for previous cycle's req
+  val s2_nack = Input(Bool()) // req from two cycles ago is rejected
+  val s2_kill = Output(Bool()) // kill req from two cycles ago
+  val s2_paddr = Input(UInt(paddrBits.W)) // translated address
+
+  val resp = Flipped(Valid(new HellaCacheResp))
+  val s2_xcpt = Input(new HellaCacheExceptions)
+  val ordered = Input(Bool())
+
+  val keep_clock_enabled = Output(Bool()) // should D$ avoid clock-gating itself?
+  val clock_enabled = Input(Bool()) // is D$ currently being clocked?
+
+  val perf = Input(new HellaCachePerfEvents())
+}
+
 class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
     with HasL1HellaCacheParameters {
   implicit val edge = outer.node.edges.out(0)
   val (tl_out, _) = outer.node.out(0)
   val io = IO(new Bundle {
-    val cpu = Flipped((new HellaCacheIO))
+    val cpu = Flipped(new ShuttleDCacheIO)
     val ptw = new TLBPTWIO()
   })
   require(rowBits == edge.bundle.dataBits)
@@ -583,25 +601,19 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
 
 
   io.cpu.ordered := mshrs.io.fence_rdy && !s1_valid && !s2_valid && !s1_replay_valid && !s2_replay_valid && !replay_arb.io.out.valid
-  io.cpu.replay_next := (s1_replay_valid && s1_replay_read) || mshrs.io.replay_next
 
   val s1_xcpt_valid = dtlb.io.req.valid && !s1_nack
   val s1_xcpt = dtlb.io.resp
   io.cpu.s2_xcpt := Mux(RegNext(s1_xcpt_valid), RegEnable(s1_xcpt, s1_valid), 0.U.asTypeOf(s1_xcpt))
-  io.cpu.s2_uncached := false.B
   io.cpu.s2_paddr := s2_req.addr
 
   // performance events
+  io.cpu.perf := DontCare
   io.cpu.perf.acquire := edge.done(tl_out.a)
   io.cpu.perf.release := edge.done(tl_out.c)
   io.cpu.perf.tlbMiss := io.ptw.req.fire()
+  io.cpu.perf.grant   := edge.done(tl_out.d)
 
   // no clock-gating support
   io.cpu.clock_enabled := true.B
-
-  // Unused
-  io.cpu.s2_nack_cause_raw := false.B
-  io.cpu.s2_gpa := false.B
-  io.cpu.s2_gpa_is_pte := false.B
-  io.cpu.perf := DontCare
 }

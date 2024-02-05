@@ -11,6 +11,7 @@ import freechips.rocketchip.rocket.Instructions._
 import shuttle.common._
 import shuttle.ifu._
 import shuttle.util._
+import shuttle.dmem.{ShuttleDCacheIO}
 
 class ShuttleCustomCSRs(implicit p: Parameters) extends freechips.rocketchip.tile.CustomCSRs {
   def marchid = CustomCSR.constant(CSRs.marchid, BigInt(34))
@@ -26,7 +27,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     val hartid = Input(UInt(hartIdLen.W))
     val interrupts = Input(new CoreInterrupts(false))
     val imem  = new ShuttleFrontendIO
-    val dmem = new HellaCacheIO
+    val dmem = new ShuttleDCacheIO
     val ptw = Flipped(new DatapathPTWIO())
     val rocc = Flipped(new RoCCCoreIO())
     val trace = Output(new TraceBundle)
