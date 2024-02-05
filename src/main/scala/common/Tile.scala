@@ -109,10 +109,8 @@ class ShuttleTile private(
   nPTWPorts += roccs.map(_.nPTWPorts).sum
   nDCachePorts += roccs.size
 
-  val dcache: HellaCache = LazyModule(new ShuttleDCache(tileId, ShuttleDCacheParams())(p))
+  val dcache = LazyModule(new ShuttleDCache(tileId, ShuttleDCacheParams())(p))
   tlMasterXbar.node := TLBuffer() := dcache.node
-  dcache.hartIdSinkNodeOpt.map { _ := hartIdNexusNode }
-  dcache.mmioAddressPrefixSinkNodeOpt.map { _ := mmioAddressPrefixNexusNode }
 
   nDCachePorts += 1 /* core */
 

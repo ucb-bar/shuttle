@@ -9,7 +9,7 @@ import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
-import freechips.rocketchip.tile.{TileVisibilityNodeKey}
+import freechips.rocketchip.tile._
 import freechips.rocketchip.rocket._
 
 case class ShuttleDCacheParams(
@@ -48,11 +48,48 @@ class MultiOutArbiter[T <: Data](val gen: T, val n: Int, val nOut: Int) extends 
   io.pipe_sel.foreach(i => assert(PopCount(i) <= 1.U))
 }
 
-class ShuttleDCache(tileId: Int, val params: ShuttleDCacheParams)(implicit p: Parameters) extends HellaCache(tileId)(p) {
+class ShuttleDCache(tileId: Int, val params: ShuttleDCacheParams)(implicit p: Parameters) extends LazyModule
+    with HasNonDiplomaticTileParameters {
+  protected val cfg = tileParams.dcache.get
+
+  protected def cacheClientParameters = Seq(TLMasterParameters.v1(
+    name          = s"Core ${tileId} DCache",
+    sourceId      = IdRange(0, 1 max cfg.nMSHRs),
+    supportsProbe = TransferSizes(cfg.blockBytes, cfg.blockBytes)))
+
+  protected def mmioClientParameters = Seq(TLMasterParameters.v1(
+    name          = s"Core ${tileId} DCache MMIO",
+    sourceId      = IdRange(firstMMIO, firstMMIO + cfg.nMMIOs),
+    requestFifo   = true))
+
+  def firstMMIO = (cacheClientParameters.map(_.sourceId.end) :+ 0).max
+
+  val node = TLClientNode(Seq(TLMasterPortParameters.v1(
+    clients = cacheClientParameters ++ mmioClientParameters,
+    minLatency = 1,
+    requestFields = Nil)))
+
   override lazy val module = new ShuttleDCacheModule(this)
 }
 
-class ShuttleDCacheModule(outer: ShuttleDCache) extends HellaCacheModule(outer) {
+class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
+    with HasL1HellaCacheParameters {
+  implicit val edge = outer.node.edges.out(0)
+  val (tl_out, _) = outer.node.out(0)
+  val io = IO(new Bundle {
+    val cpu = Flipped((new HellaCacheIO))
+    val ptw = new TLBPTWIO()
+  })
+  require(rowBits == edge.bundle.dataBits)
+
+  private val fifoManagers = edge.manager.managers.filter(TLFIFOFixer.allVolatile)
+  fifoManagers.foreach { m =>
+    require (m.fifoId == fifoManagers.head.fifoId,
+      s"IOMSHRs must be FIFO for all regions with effects, but HellaCache sees\n"+
+      s"${m.nodePath.map(_.name)}\nversus\n${fifoManagers.head.nodePath.map(_.name)}")
+  }
+
+
   val nBanks = outer.params.nBanks
   val nTagBanks = outer.params.nTagBanks
   val nWbs = outer.params.nWbs
@@ -567,6 +604,4 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends HellaCacheModule(outer) 
   io.cpu.s2_gpa := false.B
   io.cpu.s2_gpa_is_pte := false.B
   io.cpu.perf := DontCare
-  io.errors.bus.valid := false.B
-  io.errors.bus.bits := DontCare
 }
