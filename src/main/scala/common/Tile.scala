@@ -19,6 +19,7 @@ import freechips.rocketchip.prci.ClockSinkParameters
 
 import shuttle.ifu._
 import shuttle.exu._
+import shuttle.dmem._
 
 case class ShuttleTileParams(
   core: ShuttleCoreParams = ShuttleCoreParams(),
@@ -108,7 +109,7 @@ class ShuttleTile private(
   nPTWPorts += roccs.map(_.nPTWPorts).sum
   nDCachePorts += roccs.size
 
-  val dcache: HellaCache = LazyModule(p(BuildHellaCache)(this)(p))
+  val dcache: HellaCache = LazyModule(new ShuttleDCache(tileId, ShuttleDCacheParams())(p))
   tlMasterXbar.node := TLBuffer() := dcache.node
   dcache.hartIdSinkNodeOpt.map { _ := hartIdNexusNode }
   dcache.mmioAddressPrefixSinkNodeOpt.map { _ := mmioAddressPrefixNexusNode }

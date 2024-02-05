@@ -50,6 +50,7 @@ class ShuttleFPPipe(implicit p: Parameters) extends FPUModule()(p) with ShouldBe
     req.div := ctrl.div
     req.sqrt := ctrl.sqrt
     req.wflags := ctrl.wflags
+    req.vec := ctrl.vec
     req.rm := rm
     req.in1 := unbox(io.frs1_data, tag, minT)
     req.in2 := unbox(io.frs2_data, tag, minT)
