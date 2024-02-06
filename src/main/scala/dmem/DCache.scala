@@ -13,6 +13,9 @@ import freechips.rocketchip.tile._
 import freechips.rocketchip.rocket._
 
 case class ShuttleDCacheParams(
+  nSets: Int = 64,
+  nWays: Int = 4,
+  nMSHRs: Int = 8,
   nBanks: Int = 4,
   nTagBanks: Int = 4,
   singlePorted: Boolean = true,

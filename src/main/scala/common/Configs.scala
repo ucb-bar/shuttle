@@ -19,9 +19,6 @@ class WithNShuttleCores(n: Int = 1, retireWidth: Int = 2) extends Config((site, 
           tileParams = ShuttleTileParams(
             core = ShuttleCoreParams(retireWidth = retireWidth),
             btb = Some(BTBParams(nEntries=32)),
-            dcache = Some(
-              DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=4)
-            ),
             icache = Some(
               ICacheParams(rowBits = -1, nSets=64, nWays=8, fetchBytes=2*4)
             ),
@@ -77,7 +74,7 @@ class WithL1ICacheSets(sets: Int) extends Config((site, here, up) => {
 class WithL1DCacheSets(sets: Int) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
-      dcache = tp.tileParams.dcache.map(_.copy(nSets = sets))
+      dcacheParams = tp.tileParams.dcacheParams.copy(nSets = sets)
     ))
     case other => other
   }
@@ -95,7 +92,7 @@ class WithL1ICacheWays(ways: Int) extends Config((site, here, up) => {
 class WithL1DCacheWays(ways: Int) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
-      dcache = tp.tileParams.dcache.map(_.copy(nWays = ways))
+      dcacheParams = tp.tileParams.dcacheParams.copy(nWays = ways)
     ))
     case other => other
   }
@@ -104,7 +101,7 @@ class WithL1DCacheWays(ways: Int) extends Config((site, here, up) => {
 class WithL1DCacheMSHRs(n: Int) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
-      dcache = tp.tileParams.dcache.map(_.copy(nMSHRs = n))
+      dcacheParams = tp.tileParams.dcacheParams.copy(nMSHRs = n)
     ))
     case other => other
   }

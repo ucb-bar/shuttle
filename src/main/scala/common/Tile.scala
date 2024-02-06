@@ -24,20 +24,20 @@ import shuttle.dmem._
 case class ShuttleTileParams(
   core: ShuttleCoreParams = ShuttleCoreParams(),
   icache: Option[ICacheParams] = Some(ICacheParams(prefetch=true)),
-  dcache: Option[DCacheParams] = Some(DCacheParams()),
+  dcacheParams: ShuttleDCacheParams = ShuttleDCacheParams(),
   trace: Boolean = false,
   name: Option[String] = Some("shuttle_tile"),
   btb: Option[BTBParams] = Some(BTBParams()),
   tileId: Int = 0) extends InstantiableTileParams[ShuttleTile]
 {
   require(icache.isDefined)
-  require(dcache.isDefined)
   def instantiate(crossing: HierarchicalElementCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters): ShuttleTile = {
     new ShuttleTile(this, crossing, lookup)
   }
 
   val beuAddr: Option[BigInt] = None
   val blockerCtrlAddr: Option[BigInt] = None
+  val dcache = Some(DCacheParams(rowBits=64, nSets=dcacheParams.nSets, nWays=dcacheParams.nWays, nMSHRs=dcacheParams.nMSHRs))
   val boundaryBuffers: Boolean = false // if synthesized with hierarchical PnR, cut feed-throughs?
   val clockSinkParams: ClockSinkParameters = ClockSinkParameters()
   val baseName = name.getOrElse("shuttle_tile")
@@ -104,7 +104,7 @@ class ShuttleTile private(
   val nPTWPorts = 2+ roccs.map(_.nPTWPorts).sum
 
   val dcache = LazyModule(new ShuttleDCache(tileId, ShuttleDCacheParams())(p))
-  tlMasterXbar.node := TLBuffer() := dcache.node
+  tlMasterXbar.node := TLBuffer() := TLWidthWidget(tileParams.dcache.get.rowBits/8) := dcache.node
 
   override lazy val module = new ShuttleTileModuleImp(this)
 }
