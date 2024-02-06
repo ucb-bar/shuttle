@@ -32,6 +32,7 @@ class ShuttleDCacheArbiter(n: Int)(implicit p: Parameters) extends Module
         s1_id := i.U
       }
       def connect_s1() = {
+        io.mem.s1_paddr := io.requestor(i).s1_paddr
         io.mem.s1_kill := io.requestor(i).s1_kill
         io.mem.s1_data := io.requestor(i).s1_data
       }
@@ -55,11 +56,9 @@ class ShuttleDCacheArbiter(n: Int)(implicit p: Parameters) extends Module
       val resp = io.requestor(i).resp
       val tag_hit = io.mem.resp.bits.tag(log2Up(n)-1,0) === i.U
       resp.valid := io.mem.resp.valid && tag_hit
-      io.requestor(i).s2_xcpt := io.mem.s2_xcpt
       io.requestor(i).ordered := io.mem.ordered
       io.requestor(i).perf := io.mem.perf
       io.requestor(i).s2_nack := io.mem.s2_nack && s2_id === i.U
-      io.requestor(i).s2_paddr := io.mem.s2_paddr
       io.requestor(i).clock_enabled := io.mem.clock_enabled
       resp.bits := io.mem.resp.bits
       resp.bits.tag := io.mem.resp.bits.tag >> log2Up(n)

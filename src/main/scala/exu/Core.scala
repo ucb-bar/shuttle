@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tile._
+import freechips.rocketchip.tilelink.TLEdgeOut
 import freechips.rocketchip.util._
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.rocket.Instructions._
@@ -20,7 +21,7 @@ class ShuttleCustomCSRs(implicit p: Parameters) extends freechips.rocketchip.til
 }
 
 
-class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule()(p)
+class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) extends CoreModule()(p)
   with HasFPUParameters
 {
   val io = IO(new Bundle {
@@ -29,6 +30,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     val imem  = new ShuttleFrontendIO
     val dmem = new ShuttleDCacheIO
     val ptw = Flipped(new DatapathPTWIO())
+    val ptw_tlb = new TLBPTWIO
     val rocc = Flipped(new RoCCCoreIO())
     val trace = Output(new TraceBundle)
     val fcsr_rm = Output(UInt(FPConstants.RM_SZ.W))
@@ -113,10 +115,14 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       ex_uops_reg(i).valid := false.B
     }
 
-    mem_uops_reg(i).bits := ex_uops_reg(i).bits
+    when (ex_uops_reg.map(_.valid).orR) {
+      mem_uops_reg(i).bits := ex_uops_reg(i).bits
+    }
     mem_uops_reg(i).valid := ex_uops_reg(i).valid && !flush_rrd_ex && !ex_stall
 
-    wb_uops_reg(i).bits := mem_uops_reg(i).bits
+    when (mem_uops_reg.map(_.valid).orR) {
+      wb_uops_reg(i).bits := mem_uops_reg(i).bits
+    }
     wb_uops_reg(i).valid := mem_uops_reg(i).valid && !kill_mem
 
   }
@@ -359,8 +365,6 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   io.imem.redirect_flush := rrd_uops(0).valid && !rrd_stall(0) && rrd_uops(0).bits.csr_wen
 
   // ex
-
-
   val fregfile = Reg(Vec(32, UInt(65.W)))
   val fsboard = Reg(Vec(32, Bool()))
   fsboard_bsy := !fsboard.reduce(_&&_)
@@ -411,6 +415,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       fp_pipe.io.frs2_data := ex_frs2_data
       fp_pipe.io.frs3_data := ex_frs3_data
       fp_pipe.io.fcsr_rm := csr.io.fcsr_rm
+      dontTouch(ex_fp_data_hazard(i))
     }
   }
   val ex_fcsr_data_hazard = ex_uops_reg(0).valid && ex_uops_reg(0).bits.csr_en && (fsboard_bsy || mem_bsy || wb_bsy)
@@ -445,7 +450,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   io.dmem.s2_kill := false.B
 
   for (i <- 0 until retireWidth) {
-    when (RegNext(io.dmem.req.fire && ex_dmem_oh(i) && (ex_stall || flush_rrd_ex))) {
+    val kill = RegEnable(ex_stall || flush_rrd_ex, io.dmem.req.fire) || kill_mem
+    when (RegNext(io.dmem.req.fire && ex_dmem_oh(i)) && kill) {
       io.dmem.s1_kill := true.B
     }
   }
@@ -499,6 +505,11 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
 
 
   //mem
+
+  val dtlb = Module(new TLB(false, log2Ceil(8), TLBConfig(
+    tileParams.dcache.get.nTLBSets,
+    tileParams.dcache.get.nTLBWays
+  ))(edge, p))
   fp_pipe.io.s1_kill := kill_mem
 
   val mem_brjmp_oh = mem_uops_reg.map({u => u.valid && (u.bits.uses_brjmp || u.bits.next_pc.valid)})
@@ -561,9 +572,32 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     io.imem.redirect_flush := true.B
   }
 
+  val mem_dmem_oh = mem_uops_reg.map(u => u.valid && u.bits.ctrl.mem)
+  val mem_dmem_uop = Mux1H(mem_dmem_oh, mem_uops_reg)
+
+  io.ptw_tlb <> dtlb.io.ptw
+  dtlb.io.kill := false.B
+  dtlb.io.req.valid := mem_dmem_uop.valid
+  dtlb.io.req.bits.passthrough := false.B
+  dtlb.io.req.bits.vaddr := RegEnable(io.dmem.req.bits.addr, ex_uops_reg.map(_.valid).orR)
+  dtlb.io.req.bits.size := mem_dmem_uop.bits.mem_size
+  dtlb.io.req.bits.cmd := mem_dmem_uop.bits.ctrl.mem_cmd
+  dtlb.io.req.bits.prv := csr.io.status.dprv
+  dtlb.io.req.bits.v := csr.io.status.dv
+
+  dtlb.io.sfence.valid := mem_dmem_uop.valid && mem_dmem_uop.bits.ctrl.mem_cmd === M_SFENCE
+  dtlb.io.sfence.bits.rs1 := mem_dmem_uop.bits.mem_size(0)
+  dtlb.io.sfence.bits.rs2 := mem_dmem_uop.bits.mem_size(1)
+  dtlb.io.sfence.bits.addr := dtlb.io.req.bits.vaddr
+  dtlb.io.sfence.bits.asid := mem_dmem_uop.bits.rs2_data
+  dtlb.io.sfence.bits.hv := false.B
+  dtlb.io.sfence.bits.hg := false.B
+
   io.dmem.keep_clock_enabled := true.B
-  io.dmem.s1_data.data := mem_uops_reg(0).bits.rs2_data
+  io.dmem.s1_paddr := dtlb.io.resp.paddr
+  io.dmem.s1_data.data := mem_dmem_uop.bits.rs2_data
   io.dmem.s1_data.mask := DontCare
+
   for (i <- 0 until retireWidth) {
     val uop = mem_uops_reg(i).bits
     val ctrl = uop.ctrl
@@ -574,10 +608,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       wb_uops_reg(i).bits.wdata.valid := true.B
       wb_uops_reg(i).bits.wdata.bits := Sext(mem_brjmp_target.asUInt, 64)
     }
-    when (mem_uops_reg(i).valid && ctrl.mem && isWrite(ctrl.mem_cmd)) {
-      io.dmem.s1_data.data := uop.rs2_data
-      if (i == 0) {
-        when (uop.ctrl.fp) { io.dmem.s1_data.data := fp_pipe.io.s1_store_data }
+    if (i == 0) {
+      when (mem_uops_reg(i).valid && ctrl.mem && isWrite(ctrl.mem_cmd) && ctrl.fp) {
+        io.dmem.s1_data.data := fp_pipe.io.s1_store_data
       }
     }
     if (i == 0) {
@@ -588,6 +621,25 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
       wb_uops_reg(i).bits.fexc := fp_pipe.io.s1_fpiu_fexc
       if (i == 0)
         wb_uops_reg(i).bits.fdivin := fp_pipe.io.s1_fpiu_fdiv
+    }
+    when (mem_uops_reg(i).valid && ctrl.mem && (!dtlb.io.req.ready || dtlb.io.resp.miss)) {
+      wb_uops_reg(i).bits.needs_replay := true.B
+    }
+
+
+    val (xcpt, cause) = checkExceptions(List(
+      (mem_uops_reg(0).bits.xcpt     , mem_uops_reg(0).bits.xcpt_cause),
+      (ctrl.mem && dtlb.io.resp.ma.st, Causes.misaligned_store.U),
+      (ctrl.mem && dtlb.io.resp.ma.ld, Causes.misaligned_load.U),
+      (ctrl.mem && dtlb.io.resp.pf.st, Causes.store_page_fault.U),
+      (ctrl.mem && dtlb.io.resp.pf.ld, Causes.load_page_fault.U),
+      (ctrl.mem && dtlb.io.resp.ae.st, Causes.store_access.U),
+      (ctrl.mem && dtlb.io.resp.ae.ld, Causes.load_access.U)
+    ))
+
+    when (mem_uops_reg(i).valid) {
+      wb_uops_reg(i).bits.xcpt := xcpt
+      wb_uops_reg(i).bits.xcpt_cause := cause
     }
 
     mem_bypasses(i).valid := mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.wxd
@@ -642,6 +694,9 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
 
   for (i <- 0 until retireWidth) {
     when (RegNext(mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.mem && kill_mem)) {
+      io.dmem.s2_kill := true.B
+    }
+    when (wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.mem && (wb_uops_reg(i).bits.needs_replay || wb_uops_reg(i).bits.xcpt)) {
       io.dmem.s2_kill := true.B
     }
   }
@@ -773,7 +828,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     }
   }
 
-  csr.io.rw.addr := wb_uops_reg(0).bits.inst(31,20)
+  csr.io.rw.addr := Mux(wb_uops_reg(0).valid, wb_uops_reg(0).bits.inst(31,20), 0.U)
   csr.io.rw.cmd := CSR.maskCmd(wb_uops_reg(0).valid && !wb_uops_reg(0).bits.xcpt,
     wb_uops_reg(0).bits.ctrl.csr)
   csr.io.rw.wdata := wb_uops_reg(0).bits.wdata.bits
@@ -794,18 +849,8 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
   csr_fcsr_flags.foreach(_ := 0.U)
   csr.io.fcsr_flags.bits := csr_fcsr_flags.reduce(_|_)
 
-  val wb_mem = wb_uops_reg(0).valid && wb_uops_reg(0).bits.ctrl.mem
-  val (xcpt, cause) = checkExceptions(List(
-    (wb_uops_reg(0).bits.xcpt       , wb_uops_reg(0).bits.xcpt_cause),
-    (wb_mem && io.dmem.s2_xcpt.ma.st, Causes.misaligned_store.U),
-    (wb_mem && io.dmem.s2_xcpt.ma.ld, Causes.misaligned_load.U),
-    (wb_mem && io.dmem.s2_xcpt.pf.st, Causes.store_page_fault.U),
-    (wb_mem && io.dmem.s2_xcpt.pf.ld, Causes.load_page_fault.U),
-    (wb_mem && io.dmem.s2_xcpt.ae.st, Causes.store_access.U),
-    (wb_mem && io.dmem.s2_xcpt.ae.ld, Causes.load_access.U)
-  ))
-  wb_uops(0).bits.xcpt := xcpt
-  wb_uops(0).bits.xcpt_cause := cause
+  wb_uops(0).bits.xcpt := wb_uops_reg(0).valid && wb_uops_reg(0).bits.xcpt
+  wb_uops(0).bits.xcpt_cause := wb_uops_reg(0).bits.xcpt_cause
   for (i <- 0 until retireWidth) {
     when (wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.mem && io.dmem.s2_nack) {
       wb_uops(i).bits.needs_replay := true.B
@@ -815,7 +860,7 @@ class ShuttleCore(tile: ShuttleTile)(implicit p: Parameters) extends CoreModule(
     }
   }
   for (i <- 1 until retireWidth) {
-    when (wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.mem && io.dmem.s2_xcpt.asUInt =/= 0.U) {
+    when (wb_uops_reg(i).valid && wb_uops_reg(i).bits.xcpt) {
       wb_uops(i).bits.needs_replay := true.B
     }
   }

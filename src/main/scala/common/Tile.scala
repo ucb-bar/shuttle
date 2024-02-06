@@ -1,7 +1,7 @@
 package shuttle.common
 
 import chisel3._
-import chisel3.util.{RRArbiter, Queue}
+import chisel3.util._
 
 import scala.collection.mutable.{ListBuffer}
 
@@ -97,14 +97,11 @@ class ShuttleTile private(
   require(roccCSRs.flatten.map(_.id).toSet.size == roccCSRs.flatten.size,
     "LazyRoCC instantiations require overlapping CSRs")
 
-  var nPTWPorts = 1
-
   val frontend = LazyModule(new ShuttleFrontend(tileParams.icache.get, tileId))
   tlMasterXbar.node := TLBuffer() := TLWidthWidget(tileParams.icache.get.fetchBytes) := frontend.masterNode
   frontend.resetVectorSinkNode := resetVectorNexusNode
-  nPTWPorts += 1
 
-  nPTWPorts += roccs.map(_.nPTWPorts).sum
+  val nPTWPorts = 2+ roccs.map(_.nPTWPorts).sum
 
   val dcache = LazyModule(new ShuttleDCache(tileId, ShuttleDCacheParams())(p))
   tlMasterXbar.node := TLBuffer() := dcache.node
@@ -114,19 +111,23 @@ class ShuttleTile private(
 
 class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
 {
-  val dcachePorts = Wire(Vec(2, new ShuttleDCacheIO))
-  val ptwPorts = ListBuffer(outer.dcache.module.io.ptw)
+  val core = Module(new ShuttleCore(outer, outer.dcache.module.edge)(outer.p))
 
-  val ptw = Module(new PTW(outer.nPTWPorts)(outer.dcache.node.edges.out(0), outer.p))
+  val dcachePorts = Wire(Vec(2, new ShuttleDCacheIO))
+  val ptwPorts = Wire(Vec(outer.nPTWPorts, new TLBPTWIO))
+  val edge = outer.dcache.node.edges.out(0)
+  ptwPorts(0) <> core.io.ptw_tlb
+  ptwPorts(1) <> outer.frontend.module.io.ptw
+
+  val ptw = Module(new PTW(outer.nPTWPorts)(edge, outer.p))
   if (outer.usingPTW) {
     dcachePorts(0).req <> ptw.io.mem.req
+    dcachePorts(0).s1_paddr := RegEnable(ptw.io.mem.req.bits.addr, ptw.io.mem.req.valid)
     dcachePorts(0).s1_kill := ptw.io.mem.s1_kill
     dcachePorts(0).s1_data := ptw.io.mem.s1_data
     ptw.io.mem.s2_nack := dcachePorts(0).s2_nack
     dcachePorts(0).s2_kill := ptw.io.mem.s2_kill
-    ptw.io.mem.s2_paddr := dcachePorts(0).s2_paddr
     ptw.io.mem.resp <> dcachePorts(0).resp
-    ptw.io.mem.s2_xcpt := dcachePorts(0).s2_xcpt
     ptw.io.mem.ordered := dcachePorts(0).ordered
     dcachePorts(0).keep_clock_enabled := ptw.io.mem.keep_clock_enabled
     ptw.io.mem.clock_enabled := dcachePorts(0).clock_enabled
@@ -136,9 +137,21 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
     ptw.io.mem.replay_next := false.B
     ptw.io.mem.s2_gpa := false.B
     ptw.io.mem.s2_gpa_is_pte := false.B
+
+    val ptw_s2_addr = Pipe(ptw.io.mem.req.fire, ptw.io.mem.req.bits.addr, 2).bits
+    val ptw_s2_legal = edge.manager.findSafe(ptw_s2_addr).reduce(_||_)
+    ptw.io.mem.s2_paddr := ptw_s2_addr
+    ptw.io.mem.s2_xcpt.ae.ld := !(ptw_s2_legal &&
+      edge.manager.fastProperty(ptw_s2_addr, p => TransferSizes.asBool(p.supportsGet), (b: Boolean) => b.B))
+    ptw.io.mem.s2_xcpt.ae.st := false.B
+    ptw.io.mem.s2_xcpt.pf.ld := false.B
+    ptw.io.mem.s2_xcpt.pf.st := false.B
+    ptw.io.mem.s2_xcpt.gf.ld := false.B
+    ptw.io.mem.s2_xcpt.gf.st := false.B
+    ptw.io.mem.s2_xcpt.ma.ld := false.B
+    ptw.io.mem.s2_xcpt.ma.st := false.B
   }
 
-  val core = Module(new ShuttleCore(outer)(outer.p))
   outer.decodeCoreInterrupts(core.io.interrupts) // Decode the interrupt vector
 
   // Pass through various external constants and reports that were bundle-bridged into the tile
@@ -158,7 +171,7 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
       val respArb = Module(new RRArbiter(new RoCCResponse()(outer.p), outer.roccs.size))
       val cmdRouter = Module(new RoccCommandRouter(outer.roccs.map(_.opcodes))(outer.p))
       outer.roccs.zipWithIndex.foreach { case (rocc, i) =>
-        rocc.module.io.ptw ++=: ptwPorts
+        ptwPorts(i+2) <> rocc.module.io.ptw
         rocc.module.io.cmd <> cmdRouter.io.out(i)
         rocc.module.io.mem := DontCare
         rocc.module.io.mem.req.ready := false.B
@@ -198,11 +211,10 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
 
 
   val dcacheArb = Module(new ShuttleDCacheArbiter(2)(outer.p))
-  outer.dcache.module.io.cpu <> dcacheArb.io.mem
+  outer.dcache.module.io <> dcacheArb.io.mem
 
-  ptwPorts += outer.frontend.module.io.ptw
   core.io.ptw <> ptw.io.dpath
 
   dcacheArb.io.requestor <> dcachePorts
-  ptw.io.requestor <> ptwPorts.toSeq
+  ptw.io.requestor <> ptwPorts
 }
