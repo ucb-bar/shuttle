@@ -121,13 +121,28 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
 
   val ptw = Module(new PTW(outer.nPTWPorts)(edge, outer.p))
   if (outer.usingPTW) {
-    dcachePorts(0).req <> ptw.io.mem.req
+    dcachePorts(0).req.valid := ptw.io.mem.req.valid
+    dcachePorts(0).req.bits.addr := ptw.io.mem.req.bits.addr
+    dcachePorts(0).req.bits.tag := ptw.io.mem.req.bits.tag
+    dcachePorts(0).req.bits.cmd := ptw.io.mem.req.bits.cmd
+    dcachePorts(0).req.bits.size := ptw.io.mem.req.bits.size
+    dcachePorts(0).req.bits.signed := false.B
+    dcachePorts(0).req.bits.data := 0.U
+    dcachePorts(0).req.bits.mask := 0.U
+    ptw.io.mem.req.ready := dcachePorts(0).req.ready
+
     dcachePorts(0).s1_paddr := RegEnable(ptw.io.mem.req.bits.addr, ptw.io.mem.req.valid)
     dcachePorts(0).s1_kill := ptw.io.mem.s1_kill
     dcachePorts(0).s1_data := ptw.io.mem.s1_data
     ptw.io.mem.s2_nack := dcachePorts(0).s2_nack
     dcachePorts(0).s2_kill := ptw.io.mem.s2_kill
-    ptw.io.mem.resp <> dcachePorts(0).resp
+
+    ptw.io.mem.resp.valid := dcachePorts(0).resp.valid
+    ptw.io.mem.resp.bits := DontCare
+    ptw.io.mem.resp.bits.has_data := true.B
+    ptw.io.mem.resp.bits.tag := dcachePorts(0).resp.bits.tag
+    ptw.io.mem.resp.bits.data := dcachePorts(0).resp.bits.data
+    ptw.io.mem.resp.bits.size := dcachePorts(0).resp.bits.size
     ptw.io.mem.ordered := dcachePorts(0).ordered
     dcachePorts(0).keep_clock_enabled := ptw.io.mem.keep_clock_enabled
     ptw.io.mem.clock_enabled := dcachePorts(0).clock_enabled

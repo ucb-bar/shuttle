@@ -1,10 +1,10 @@
 // See LICENSE.Berkeley for license details.
-// See LICENSE.SiFive for license details.
 
 package shuttle.dmem
 
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.dataview._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
@@ -76,14 +76,14 @@ class ShuttleDCache(tileId: Int, val params: ShuttleDCacheParams)(implicit p: Pa
 }
 
 class ShuttleDCacheIO(implicit p: Parameters) extends CoreBundle()(p) {
-  val req = Decoupled(new HellaCacheReq)
+  val req = Decoupled(new ShuttleDMemReq)
   val s1_paddr = Output(UInt(paddrBits.W))
   val s1_kill = Output(Bool()) // kill previous cycle's req
   val s1_data = Output(new HellaCacheWriteData()) // data for previous cycle's req
   val s2_nack = Input(Bool()) // req from two cycles ago is rejected
   val s2_kill = Output(Bool()) // kill req from two cycles ago
 
-  val resp = Flipped(Valid(new HellaCacheResp))
+  val resp = Flipped(Valid(new ShuttleDMemResp))
   val ordered = Input(Bool())
 
   val keep_clock_enabled = Output(Bool()) // should D$ avoid clock-gating itself?
@@ -118,48 +118,6 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   }
 
 
-  def hellaCacheReqToMSHRReqInternal(i: HellaCacheReq): MSHRReqInternal = {
-    val o = Wire(new MSHRReqInternal)
-    o := DontCare
-    o.addr := i.addr
-    o.idx.foreach(_ := i.idx.get)
-    o.tag := i.tag
-    o.cmd := i.cmd
-    o.size := i.size
-    o.signed := i.signed
-    o.dprv := i.dprv
-    o.phys := i.phys
-    o.no_alloc := i.no_alloc
-    o.no_xcpt := i.no_xcpt
-    o
-  }
-  def hellaCacheReqToHellaCacheResp(i: HellaCacheReq): HellaCacheResp = {
-    val o = Wire(new HellaCacheResp)
-    o := DontCare
-    o.addr := i.addr
-    o.idx.foreach(_ := i.idx.get)
-    o.tag := i.tag
-    o.cmd := i.cmd
-    o.size := i.size
-    o.signed := i.signed
-    o.dprv := i.dprv
-    o
-  }
-  def replayToHellaCacheResp(i: Replay): HellaCacheResp = {
-    val o = Wire(new HellaCacheResp)
-    o := DontCare
-    o.addr := i.addr
-    o.idx.foreach(_ := i.idx.get)
-    o.tag := i.tag
-    o.cmd := i.cmd
-    o.size := i.size
-    o.signed := i.signed
-    o.dprv := i.dprv
-    o.data := i.data
-    o.mask := i.mask
-    o
-  }
-
   require(isPow2(nWays)) // TODO: relax this
   require(dataScratchpadSize == 0)
   require(!usingVM || untagBits <= pgIdxBits, s"untagBits($untagBits) > pgIdxBits($pgIdxBits)")
@@ -171,8 +129,8 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   val wb = Module(new MultiWritebackUnit(nWbs))
   val prober = Module(new ProbeUnit)
   val mshrs = Module(new ShuttleDCacheMSHRFile)
-  val replay_data_q = Module(new Queue(new HellaCacheResp, replayQueueSize))
-  val replay_empty_q = Module(new Queue(new HellaCacheResp, replayQueueSize*2))
+  val replay_data_q = Module(new Queue(new ShuttleDMemResp, replayQueueSize))
+  val replay_empty_q = Module(new Queue(new ShuttleDMemResp, replayQueueSize*2))
 
   io.req.ready := true.B
   val s1_valid = RegNext(io.req.fire(), init=false.B)
@@ -369,7 +327,8 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
 
   // miss handling
   mshrs.io.req.valid := s2_valid_masked && !s2_hit && (isPrefetch(s2_req.cmd) || isRead(s2_req.cmd) || isWrite(s2_req.cmd))
-  mshrs.io.req.bits := hellaCacheReqToMSHRReqInternal(s2_req)
+  mshrs.io.req.bits.sdq_id := 0.U
+  mshrs.io.req.bits.viewAsSupertype(new ShuttleDMemReq) := s2_req
   mshrs.io.req.bits.tag_match := s2_tag_match
   mshrs.io.req.bits.old_meta := Mux(s2_tag_match, L1Metadata(s2_repl_meta.tag, s2_hit_state), s2_repl_meta)
   mshrs.io.req.bits.way_en := Mux(s2_tag_match, s2_tag_match_way, s2_replaced_way_en)
@@ -527,54 +486,44 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   val s2_nack = s2_nack_hit || s2_nack_victim || s2_nack_miss || s2_nack_probe
   s2_valid_masked := s2_valid && !s2_nack && !io.s2_kill
 
-  val cache_resp = Wire(Valid(new HellaCacheResp))
+  val cache_resp = Wire(Valid(new ShuttleDMemResp))
   cache_resp.valid := s2_valid_masked && s2_hit
-  cache_resp.bits := hellaCacheReqToHellaCacheResp(s2_req)
+  cache_resp.bits.tag := s2_req.tag
+  cache_resp.bits.size := s2_req.size
   cache_resp.bits.has_data := isRead(s2_req.cmd)
   cache_resp.bits.data := loadgen.data | s2_sc_fail
-  cache_resp.bits.store_data := s2_req.data
-  cache_resp.bits.replay := false.B
 
-  
-  val replay_data_resp = Wire(Valid(new HellaCacheResp))
+  val replay_data_resp = Wire(Valid(new ShuttleDMemResp))
   replay_data_resp.valid := s2_replay_valid && isRead(s2_replay_req.cmd) 
-  replay_data_resp.bits := replayToHellaCacheResp(s2_replay_req)
+  replay_data_resp.bits.tag := s2_replay_req.tag
+  replay_data_resp.bits.size := s2_replay_req.size
   replay_data_resp.bits.has_data := true.B
   replay_data_resp.bits.data := replay_loadgen.data | s2_replay_sc_fail
-  replay_data_resp.bits.store_data := s2_replay_req.data
-  replay_data_resp.bits.data_word_bypass := replay_loadgen.wordData
-  replay_data_resp.bits.data_raw := s2_replay_data_word
-  replay_data_resp.bits.replay := true.B
 
   replay_data_q.io.enq.valid := replay_data_resp.valid
   replay_data_q.io.enq.bits := replay_data_resp.bits
   replay_data_q.io.deq.ready := false.B
 
-  val replay_empty_resp = Wire(Valid(new HellaCacheResp))
+  val replay_empty_resp = Wire(Valid(new ShuttleDMemResp))
   replay_empty_resp.valid := s2_replay_valid && !isRead(s2_replay_req.cmd)
-  replay_empty_resp.bits := replayToHellaCacheResp(s2_replay_req)
+  replay_empty_resp.bits.size := s2_replay_req.size
+  replay_empty_resp.bits.tag := s2_replay_req.tag
   replay_empty_resp.bits.has_data := false.B
   replay_empty_resp.bits.data := DontCare
-  replay_empty_resp.bits.store_data := DontCare
-  replay_empty_resp.bits.data_word_bypass := DontCare
-  replay_empty_resp.bits.data_raw := DontCare
-  replay_empty_resp.bits.replay := true.B
 
   replay_empty_q.io.enq.valid := replay_empty_resp.valid
   replay_empty_q.io.enq.bits := replay_empty_resp.bits
   replay_empty_q.io.deq.ready := false.B
 
-  val uncache_resp = Wire(Valid(new HellaCacheResp))
+  val uncache_resp = Wire(Valid(new ShuttleDMemResp))
   uncache_resp.bits := mshrs.io.resp.bits
   uncache_resp.valid := mshrs.io.resp.valid
   mshrs.io.resp.ready := RegNext(!s1_valid && !s1_replay_valid)
 
   io.s2_nack := s2_valid && s2_nack
   io.resp := Mux(mshrs.io.resp.ready, uncache_resp, cache_resp)
-  io.resp.bits.data_word_bypass := loadgen.wordData
-  io.resp.bits.data_raw := s2_data_word
 
-  val replay_arb = Module(new Arbiter(new HellaCacheResp, 2))
+  val replay_arb = Module(new Arbiter(new ShuttleDMemResp, 2))
   replay_arb.io.in(0) <> replay_data_q.io.deq
   replay_arb.io.in(1) <> replay_empty_q.io.deq
   replay_arb.io.out.ready := false.B

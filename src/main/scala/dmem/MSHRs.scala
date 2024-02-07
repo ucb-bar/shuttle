@@ -9,23 +9,13 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import freechips.rocketchip.rocket._
 
-class ShuttleDCacheMSHR(id: Int)(implicit edge: TLEdgeOut, p: Parameters) extends MSHR(id)(edge, p) {
-  when (state === s_drain_rpq && !rpq.io.deq.valid) {
-    state := Mux(RegNext(!rpq.io.deq.valid), s_invalid, state)
-  }
-
-
-  io.replay.bits.cmd := rpq.io.deq.bits.cmd
-  rpq.io.deq.ready := io.replay.ready && state === s_drain_rpq
-  io.meta_read := DontCare
-}
 
 class ShuttleDCacheMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCacheModule()(p) {
   val io = IO(new Bundle {
-    val req = Flipped(Decoupled(new MSHRReqInternal))
+    val req = Flipped(Decoupled(new ShuttleMSHRReq))
     val req_data = Input(UInt(coreDataBits.W))
     val req_mask = Input(UInt(coreDataBytes.W))
-    val resp = Decoupled(new HellaCacheResp)
+    val resp = Decoupled(new ShuttleDMemResp)
     val secondary_miss = Output(Bool())
 
     val mem_acquire  = Decoupled(new TLBundleA(edge.bundle))
@@ -34,7 +24,7 @@ class ShuttleDCacheMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1H
 
     val refill = Output(new L1RefillReq())
     val meta_write = Decoupled(new L1MetaWriteReq)
-    val replay = Decoupled(new Replay)
+    val replay = Decoupled(new ShuttleMSHRReq)
     val replay_way = Output(UInt(nWays.W))
     val wb_req = Decoupled(new WritebackReq(edge.bundle))
 
@@ -68,7 +58,7 @@ class ShuttleDCacheMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1H
   val refillMux = Wire(Vec(cfg.nMSHRs, new L1RefillReq))
   val meta_write_arb = Module(new Arbiter(new L1MetaWriteReq, cfg.nMSHRs))
   val wb_req_arb = Module(new Arbiter(new WritebackReq(edge.bundle), cfg.nMSHRs))
-  val replay_arb = Module(new Arbiter(new ReplayInternal, cfg.nMSHRs))
+  val replay_arb = Module(new Arbiter(new ShuttleMSHRReq, cfg.nMSHRs))
   val alloc_arb = Module(new Arbiter(Bool(), cfg.nMSHRs))
   alloc_arb.io.in.foreach(_.bits := DontCare)
 
@@ -91,7 +81,6 @@ class ShuttleDCacheMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1H
     mshr.io.req_sec_val := io.req.valid && sdq_rdy && addr_match(i)
     mshr.io.req_bits := io.req.bits
     mshr.io.req_bits.sdq_id := sdq_alloc_id
-    mshr.io.meta_read.ready := false.B
 
     meta_write_arb.io.in(i) <> mshr.io.meta_write
     wb_req_arb.io.in(i) <> mshr.io.wb_req
@@ -120,28 +109,18 @@ class ShuttleDCacheMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1H
 
   val mmio_alloc_arb = Module(new Arbiter(Bool(), nIOMSHRs))
   mmio_alloc_arb.io.in.foreach(_.bits := DontCare)
-  val resp_arb = Module(new Arbiter(new HellaCacheResp, nIOMSHRs))
+  val resp_arb = Module(new Arbiter(new ShuttleDMemResp, nIOMSHRs))
 
   var mmio_rdy = false.B
   io.replay_next := false.B
 
   val mmios = (0 until nIOMSHRs) map { i =>
     val id = cfg.nMSHRs + i
-    val mshr = Module(new IOMSHR(id))
+    val mshr = Module(new IOHandler(id))
 
     mmio_alloc_arb.io.in(i).valid := mshr.io.req.ready
     mshr.io.req.valid := mmio_alloc_arb.io.in(i).ready
-    mshr.io.req.bits.addr := io.req.bits.addr
-    mshr.io.req.bits.idx.foreach(_ := io.req.bits.idx.get)
-    mshr.io.req.bits.tag := io.req.bits.tag
-    mshr.io.req.bits.cmd := io.req.bits.cmd
-    mshr.io.req.bits.size := io.req.bits.size
-    mshr.io.req.bits.signed := io.req.bits.signed
-    mshr.io.req.bits.dprv := io.req.bits.dprv
-    mshr.io.req.bits.dv := io.req.bits.dv
-    mshr.io.req.bits.phys := io.req.bits.phys
-    mshr.io.req.bits.no_alloc := io.req.bits.no_alloc
-    mshr.io.req.bits.no_xcpt := io.req.bits.no_xcpt
+    mshr.io.req.bits := io.req.bits
     mshr.io.req.bits.data := io.req_data
     mshr.io.req.bits.mask := io.req_mask
 
@@ -175,7 +154,7 @@ class ShuttleDCacheMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1H
   io.replay.bits.mask := sdq(RegEnable(replay_arb.io.out.bits.sdq_id, free_sdq)).mask
   io.replay_way := Mux1H(UIntToOH(replay_arb.io.chosen), mshrs.map(_.io.meta_write.bits.way_en))
   io.replay.valid := replay_arb.io.out.valid
-  io.replay.bits.viewAsSupertype(new HellaCacheReqInternal) := replay_arb.io.out.bits.viewAsSupertype(new HellaCacheReqInternal)
+  io.replay.bits := replay_arb.io.out.bits
   replay_arb.io.out.ready := io.replay.ready
 
   when (io.replay.valid || sdq_enq) {

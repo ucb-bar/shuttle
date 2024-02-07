@@ -441,9 +441,6 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   io.dmem.req.bits.cmd := ex_dmem_uop.bits.ctrl.mem_cmd
   io.dmem.req.bits.size := ex_dmem_uop.bits.mem_size
   io.dmem.req.bits.signed := !ex_dmem_uop.bits.inst(14)
-  io.dmem.req.bits.phys := false.B
-  io.dmem.req.bits.idx.foreach(_ := io.dmem.req.bits.addr)
-  io.dmem.req.bits.dprv := csr.io.status.dprv
   io.dmem.req.bits.addr := Mux1H(ex_dmem_oh, ex_dmem_addrs)
 
   io.dmem.s1_kill := false.B
