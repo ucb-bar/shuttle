@@ -150,8 +150,8 @@ class ShuttleDCacheMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1H
   io.refill := refillMux(io.mem_grant.bits.source)
 
   val free_sdq = io.replay.fire() && isWrite(io.replay.bits.cmd)
-  io.replay.bits.data := sdq(RegEnable(replay_arb.io.out.bits.sdq_id, free_sdq)).data
-  io.replay.bits.mask := sdq(RegEnable(replay_arb.io.out.bits.sdq_id, free_sdq)).mask
+  io.replay.bits.data := sdq(replay_arb.io.out.bits.sdq_id).data
+  io.replay.bits.mask := sdq(replay_arb.io.out.bits.sdq_id).mask
   io.replay_way := Mux1H(UIntToOH(replay_arb.io.chosen), mshrs.map(_.io.meta_write.bits.way_en))
   io.replay.valid := replay_arb.io.out.valid
   io.replay.bits := replay_arb.io.out.bits

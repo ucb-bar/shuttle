@@ -15,7 +15,7 @@ import freechips.rocketchip.rocket._
 case class ShuttleDCacheParams(
   nSets: Int = 64,
   nWays: Int = 4,
-  nMSHRs: Int = 8,
+  nMSHRs: Int = 4,
   nBanks: Int = 4,
   nTagBanks: Int = 4,
   singlePorted: Boolean = true,
@@ -173,7 +173,7 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   val s1_replay_read  = isRead(s1_replay_req.cmd)
   val s1_replay_write = isWrite(s1_replay_req.cmd)
   val s1_replay_readwrite = s1_replay_read || s1_replay_write || isPrefetch(s1_replay_req.cmd)
-  
+
   // check for unsupported operations
   assert(!s1_valid || !s1_req.cmd.isOneOf(M_PWR))
 
@@ -185,9 +185,6 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   }
   when (s1_valid) {
     s2_req.addr := s1_addr
-  }
-  when (s1_replay_valid && s1_replay_write) {
-    s2_replay_req.data := mshrs.io.replay.bits.data
   }
 
   // tags

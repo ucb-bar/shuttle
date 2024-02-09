@@ -12,7 +12,7 @@ import freechips.rocketchip.rocket.Instructions._
 import shuttle.common._
 import shuttle.ifu._
 import shuttle.util._
-import shuttle.dmem.{ShuttleDCacheIO}
+import shuttle.dmem.{ShuttleDCacheIO, ShuttleDTLB}
 
 class ShuttleCustomCSRs(implicit p: Parameters) extends freechips.rocketchip.tile.CustomCSRs {
   def marchid = CustomCSR.constant(CSRs.marchid, BigInt(34))
@@ -503,7 +503,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
   //mem
 
-  val dtlb = Module(new TLB(false, log2Ceil(8), TLBConfig(
+  val dtlb = Module(new ShuttleDTLB(log2Ceil(8), TLBConfig(
     tileParams.dcache.get.nTLBSets,
     tileParams.dcache.get.nTLBWays
   ))(edge, p))
@@ -573,14 +573,11 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val mem_dmem_uop = Mux1H(mem_dmem_oh, mem_uops_reg)
 
   io.ptw_tlb <> dtlb.io.ptw
-  dtlb.io.kill := false.B
   dtlb.io.req.valid := mem_dmem_uop.valid
-  dtlb.io.req.bits.passthrough := false.B
   dtlb.io.req.bits.vaddr := RegEnable(io.dmem.req.bits.addr, ex_uops_reg.map(_.valid).orR)
   dtlb.io.req.bits.size := mem_dmem_uop.bits.mem_size
   dtlb.io.req.bits.cmd := mem_dmem_uop.bits.ctrl.mem_cmd
   dtlb.io.req.bits.prv := csr.io.status.dprv
-  dtlb.io.req.bits.v := csr.io.status.dv
 
   dtlb.io.sfence.valid := mem_dmem_uop.valid && mem_dmem_uop.bits.ctrl.mem_cmd === M_SFENCE
   dtlb.io.sfence.bits.rs1 := mem_dmem_uop.bits.mem_size(0)
