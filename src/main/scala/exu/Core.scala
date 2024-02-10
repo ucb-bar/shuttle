@@ -503,7 +503,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
   //mem
 
-  val dtlb = Module(new ShuttleDTLB(log2Ceil(8), TLBConfig(
+  val dtlb = Module(new ShuttleDTLB(1, log2Ceil(8), TLBConfig(
     tileParams.dcache.get.nTLBSets,
     tileParams.dcache.get.nTLBWays
   ))(edge, p))
@@ -573,22 +573,22 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val mem_dmem_uop = Mux1H(mem_dmem_oh, mem_uops_reg)
 
   io.ptw_tlb <> dtlb.io.ptw
-  dtlb.io.req.valid := mem_dmem_uop.valid
-  dtlb.io.req.bits.vaddr := RegEnable(io.dmem.req.bits.addr, ex_uops_reg.map(_.valid).orR)
-  dtlb.io.req.bits.size := mem_dmem_uop.bits.mem_size
-  dtlb.io.req.bits.cmd := mem_dmem_uop.bits.ctrl.mem_cmd
-  dtlb.io.req.bits.prv := csr.io.status.dprv
+  dtlb.io.req(0).valid := mem_dmem_uop.valid
+  dtlb.io.req(0).bits.vaddr := RegEnable(io.dmem.req.bits.addr, ex_uops_reg.map(_.valid).orR)
+  dtlb.io.req(0).bits.size := mem_dmem_uop.bits.mem_size
+  dtlb.io.req(0).bits.cmd := mem_dmem_uop.bits.ctrl.mem_cmd
+  dtlb.io.req(0).bits.prv := csr.io.status.dprv
 
   dtlb.io.sfence.valid := mem_dmem_uop.valid && mem_dmem_uop.bits.ctrl.mem_cmd === M_SFENCE
   dtlb.io.sfence.bits.rs1 := mem_dmem_uop.bits.mem_size(0)
   dtlb.io.sfence.bits.rs2 := mem_dmem_uop.bits.mem_size(1)
-  dtlb.io.sfence.bits.addr := dtlb.io.req.bits.vaddr
+  dtlb.io.sfence.bits.addr := dtlb.io.req(0).bits.vaddr
   dtlb.io.sfence.bits.asid := mem_dmem_uop.bits.rs2_data
   dtlb.io.sfence.bits.hv := false.B
   dtlb.io.sfence.bits.hg := false.B
 
   io.dmem.keep_clock_enabled := true.B
-  io.dmem.s1_paddr := dtlb.io.resp.paddr
+  io.dmem.s1_paddr := dtlb.io.resp(0).paddr
   io.dmem.s1_data.data := mem_dmem_uop.bits.rs2_data
   io.dmem.s1_data.mask := DontCare
 
@@ -616,19 +616,19 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       if (i == 0)
         wb_uops_reg(i).bits.fdivin := fp_pipe.io.s1_fpiu_fdiv
     }
-    when (mem_uops_reg(i).valid && ctrl.mem && (!dtlb.io.req.ready || dtlb.io.resp.miss)) {
+    when (mem_uops_reg(i).valid && ctrl.mem && (!dtlb.io.req(0).ready || dtlb.io.resp(0).miss)) {
       wb_uops_reg(i).bits.needs_replay := true.B
     }
 
 
     val (xcpt, cause) = checkExceptions(List(
-      (mem_uops_reg(0).bits.xcpt     , mem_uops_reg(0).bits.xcpt_cause),
-      (ctrl.mem && dtlb.io.resp.ma.st, Causes.misaligned_store.U),
-      (ctrl.mem && dtlb.io.resp.ma.ld, Causes.misaligned_load.U),
-      (ctrl.mem && dtlb.io.resp.pf.st, Causes.store_page_fault.U),
-      (ctrl.mem && dtlb.io.resp.pf.ld, Causes.load_page_fault.U),
-      (ctrl.mem && dtlb.io.resp.ae.st, Causes.store_access.U),
-      (ctrl.mem && dtlb.io.resp.ae.ld, Causes.load_access.U)
+      (mem_uops_reg(0).bits.xcpt        , mem_uops_reg(0).bits.xcpt_cause),
+      (ctrl.mem && dtlb.io.resp(0).ma.st, Causes.misaligned_store.U),
+      (ctrl.mem && dtlb.io.resp(0).ma.ld, Causes.misaligned_load.U),
+      (ctrl.mem && dtlb.io.resp(0).pf.st, Causes.store_page_fault.U),
+      (ctrl.mem && dtlb.io.resp(0).pf.ld, Causes.load_page_fault.U),
+      (ctrl.mem && dtlb.io.resp(0).ae.st, Causes.store_access.U),
+      (ctrl.mem && dtlb.io.resp(0).ae.ld, Causes.load_access.U)
     ))
 
     when (mem_uops_reg(i).valid) {
