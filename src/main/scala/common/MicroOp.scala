@@ -18,6 +18,8 @@ class ShuttleUOP(implicit p: Parameters) extends CoreBundle {
   val fp_ctrl = new FPUCtrlSigs
   val rvc = Bool()
 
+  val sets_vcfg = Bool()
+
   val btb_resp = Valid(new BTBResp)
   val next_pc = Valid(UInt(vaddrBitsExtended.W))
   val ras_head = UInt(log2Ceil(nRAS).W)
