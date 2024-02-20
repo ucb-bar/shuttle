@@ -12,7 +12,7 @@ import freechips.rocketchip.rocket.Instructions._
 import shuttle.common._
 import shuttle.ifu._
 import shuttle.util._
-import shuttle.dmem.{ShuttleDCacheIO, ShuttleDTLB}
+import shuttle.dmem.{ShuttleDCacheIO}
 
 class ShuttleCustomCSRs(implicit p: Parameters) extends freechips.rocketchip.tile.CustomCSRs {
   def marchid = CustomCSR.constant(CSRs.marchid, BigInt(34))
@@ -72,9 +72,10 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val wb_uops = WireInit(wb_uops_reg)
 
   val ex_vcfg = usingVector.option(Reg(Valid(new VConfig)))
+  val ex_vcfg_out = ex_vcfg.map(v => WireInit(v))
   val mem_vcfg = usingVector.option(Reg(Valid(new VConfig)))
   val wb_vcfg = usingVector.option(Reg(Valid(new VConfig)))
-  val rrd_vcfg = usingVector.option((ex_vcfg ++ mem_vcfg ++ wb_vcfg)
+  val rrd_vcfg = usingVector.option((ex_vcfg_out ++ mem_vcfg ++ wb_vcfg)
     .foldRight(csr.io.vector.get.vconfig)((a, b) => Mux(a.valid, a.bits, b)))
 
   class Bypass extends Bundle {
@@ -103,7 +104,6 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val flush_rrd_ex = WireInit(false.B)
   val kill_mem = WireInit(false.B)
   val kill_wb = WireInit(VecInit(Seq.fill(retireWidth) { false.B }))
-  assert(!kill_wb(0))
 
   val ex_bsy = ex_uops_reg.map(_.valid).reduce(_||_)
   val mem_bsy = mem_uops_reg.map(_.valid).reduce(_||_)
@@ -131,8 +131,8 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     }
     when (flush_rrd_ex) { ex_vcfg.get.valid := false.B }
 
-    when (ex_vcfg.get.valid) { mem_vcfg.get.bits := ex_vcfg.get.bits }
-    mem_vcfg.get.valid := ex_vcfg.get.valid && !flush_rrd_ex && !ex_stall
+    when (ex_vcfg_out.get.valid) { mem_vcfg.get.bits := ex_vcfg_out.get.bits }
+    mem_vcfg.get.valid := ex_vcfg_out.get.valid && !flush_rrd_ex && !ex_stall
 
     when (mem_vcfg.get.valid) { wb_vcfg.get.bits := mem_vcfg.get.bits }
     wb_vcfg.get.valid := wb_vcfg.get.valid && !kill_mem
@@ -462,7 +462,6 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       fp_pipe.io.frs2_data := ex_frs2_data
       fp_pipe.io.frs3_data := ex_frs3_data
       fp_pipe.io.fcsr_rm := csr.io.fcsr_rm
-      dontTouch(ex_fp_data_hazard(i))
     }
   }
   val ex_fcsr_data_hazard = ex_uops_reg(0).valid && ex_uops_reg(0).bits.csr_en && (fsboard_bsy || mem_bsy || wb_bsy)
@@ -481,8 +480,8 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       !ex_setvcfg_uop.inst(31)        -> ex_setvcfg_uop.inst(30,20))))
     val ex_new_vl = ex_new_vtype.vl(ex_avl, ex_vcfg.get.bits.vl, false.B, false.B, false.B)
     when (ex_setvcfg_valid.orR) {
-      mem_vcfg.get.bits.vtype := ex_new_vtype
-      mem_vcfg.get.bits.vl    := ex_new_vl
+      ex_vcfg_out.get.bits.vtype := ex_new_vtype
+      ex_vcfg_out.get.bits.vl := ex_new_vl
     }
     Some(ex_new_vl)
   } else {
@@ -514,6 +513,16 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   io.dmem.s1_kill := false.B
   io.dmem.s2_kill := false.B
 
+  io.vector.foreach { v =>
+    v.status := csr.io.status
+    v.ex.valid := ex_uops_reg(0).valid && ex_uops_reg(0).bits.ctrl.vec && !ex_uops_reg(0).bits.xcpt
+    v.ex.vconfig := ex_vcfg.get.bits
+    v.ex.vstart := Mux(ex_vcfg.get.valid || mem_vcfg.get.valid || wb_vcfg.get.valid, 0.U, csr.io.vector.get.vstart)
+    v.ex.fire := !ex_stall && !flush_rrd_ex
+    v.ex.uop := ex_uops_reg(0).bits
+  }
+  val ex_vec_hazard = io.vector.map { v => v.ex.valid && !v.ex.ready }.getOrElse(false.B)
+
   for (i <- 0 until retireWidth) {
     val kill = RegEnable(ex_stall || flush_rrd_ex, io.dmem.req.fire) || kill_mem
     when (RegNext(io.dmem.req.fire && ex_dmem_oh(i)) && kill) {
@@ -544,7 +553,9 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     alu.io.in1 := ex_op1.asUInt
 
     mem_uops_reg(i).bits.wdata.valid := uop.uses_alu && !uop.uses_memalu
-    mem_uops_reg(i).bits.wdata.bits := Mux(uop.sets_vcfg, ex_new_vl.getOrElse(alu.io.out), alu.io.out)
+    mem_uops_reg(i).bits.wdata.bits := Mux(uop.sets_vcfg && !uop.xcpt,
+      ex_new_vl.getOrElse(alu.io.out),
+      alu.io.out)
     mem_uops_reg(i).bits.taken := alu.io.cmp_out
 
     ex_bypasses(i).valid := ex_uops_reg(i).valid && ctrl.wxd
@@ -563,15 +574,15 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val ex_dmem_structural_hazard = io.dmem.req.valid && !io.dmem.req.ready
 
   ex_stall := ex_uops_reg.map(_.valid).reduce(_||_) && (
+    ex_vec_hazard ||
     ex_fcsr_data_hazard ||
     ex_dmem_structural_hazard ||
     ex_fp_data_hazard.reduce(_||_)
   )
 
-
   //mem
 
-  val dtlb = Module(new ShuttleDTLB(1, log2Ceil(8), TLBConfig(
+  val dtlb = Module(new TLB(false, log2Ceil(8), TLBConfig(
     tileParams.dcache.get.nTLBSets,
     tileParams.dcache.get.nTLBWays
   ))(edge, p))
@@ -641,22 +652,35 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val mem_dmem_uop = Mux1H(mem_dmem_oh, mem_uops_reg)
 
   io.ptw_tlb <> dtlb.io.ptw
-  dtlb.io.req(0).valid := mem_dmem_uop.valid
-  dtlb.io.req(0).bits.vaddr := RegEnable(io.dmem.req.bits.addr, ex_uops_reg.map(_.valid).orR)
-  dtlb.io.req(0).bits.size := mem_dmem_uop.bits.mem_size
-  dtlb.io.req(0).bits.cmd := mem_dmem_uop.bits.ctrl.mem_cmd
-  dtlb.io.req(0).bits.prv := csr.io.status.dprv
+  dtlb.io.req.valid := mem_dmem_uop.valid
+  dtlb.io.req.bits.vaddr := RegEnable(io.dmem.req.bits.addr, ex_uops_reg.map(_.valid).orR)
+  dtlb.io.req.bits.size := mem_dmem_uop.bits.mem_size
+  dtlb.io.req.bits.cmd := mem_dmem_uop.bits.ctrl.mem_cmd
+  dtlb.io.req.bits.prv := csr.io.status.dprv
+  dtlb.io.req.bits.v := csr.io.status.v
+  dtlb.io.req.bits.passthrough := false.B
 
   dtlb.io.sfence.valid := mem_dmem_uop.valid && mem_dmem_uop.bits.ctrl.mem_cmd === M_SFENCE
   dtlb.io.sfence.bits.rs1 := mem_dmem_uop.bits.mem_size(0)
   dtlb.io.sfence.bits.rs2 := mem_dmem_uop.bits.mem_size(1)
-  dtlb.io.sfence.bits.addr := dtlb.io.req(0).bits.vaddr
+  dtlb.io.sfence.bits.addr := dtlb.io.req.bits.vaddr
   dtlb.io.sfence.bits.asid := mem_dmem_uop.bits.rs2_data
   dtlb.io.sfence.bits.hv := false.B
   dtlb.io.sfence.bits.hg := false.B
+  dtlb.io.kill := false.B
+
+  io.vector.foreach { v =>
+    when (!mem_dmem_uop.valid) {
+      dtlb.io.req.valid := v.mem.tlb_req.valid
+      dtlb.io.req.bits := v.mem.tlb_req.bits
+    }
+    v.mem.tlb_req.ready := !mem_dmem_uop.valid
+    v.mem.tlb_resp := dtlb.io.resp
+    v.mem.kill := kill_mem
+  }
 
   io.dmem.keep_clock_enabled := true.B
-  io.dmem.s1_paddr := dtlb.io.resp(0).paddr
+  io.dmem.s1_paddr := dtlb.io.resp.paddr
   io.dmem.s1_data.data := mem_dmem_uop.bits.rs2_data
   io.dmem.s1_data.mask := DontCare
 
@@ -684,19 +708,18 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       if (i == 0)
         wb_uops_reg(i).bits.fdivin := fp_pipe.io.s1_fpiu_fdiv
     }
-    when (mem_uops_reg(i).valid && ctrl.mem && (!dtlb.io.req(0).ready || dtlb.io.resp(0).miss)) {
+    when (mem_uops_reg(i).valid && ctrl.mem && (!dtlb.io.req.ready || dtlb.io.resp.miss)) {
       wb_uops_reg(i).bits.needs_replay := true.B
     }
 
-
     val (xcpt, cause) = checkExceptions(List(
-      (mem_uops_reg(0).bits.xcpt        , mem_uops_reg(0).bits.xcpt_cause),
-      (ctrl.mem && dtlb.io.resp(0).ma.st, Causes.misaligned_store.U),
-      (ctrl.mem && dtlb.io.resp(0).ma.ld, Causes.misaligned_load.U),
-      (ctrl.mem && dtlb.io.resp(0).pf.st, Causes.store_page_fault.U),
-      (ctrl.mem && dtlb.io.resp(0).pf.ld, Causes.load_page_fault.U),
-      (ctrl.mem && dtlb.io.resp(0).ae.st, Causes.store_access.U),
-      (ctrl.mem && dtlb.io.resp(0).ae.ld, Causes.load_access.U)
+      (mem_uops_reg(0).bits.xcpt     , mem_uops_reg(0).bits.xcpt_cause),
+      (ctrl.mem && dtlb.io.resp.ma.st, Causes.misaligned_store.U),
+      (ctrl.mem && dtlb.io.resp.ma.ld, Causes.misaligned_load.U),
+      (ctrl.mem && dtlb.io.resp.pf.st, Causes.store_page_fault.U),
+      (ctrl.mem && dtlb.io.resp.pf.ld, Causes.load_page_fault.U),
+      (ctrl.mem && dtlb.io.resp.ae.st, Causes.store_access.U),
+      (ctrl.mem && dtlb.io.resp.ae.ld, Causes.load_access.U)
     ))
 
     when (mem_uops_reg(i).valid) {
@@ -758,7 +781,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     when (RegNext(mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.mem && kill_mem)) {
       io.dmem.s2_kill := true.B
     }
-    when (wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.mem && (wb_uops_reg(i).bits.needs_replay || wb_uops_reg(i).bits.xcpt)) {
+    when (wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.mem && (wb_uops(i).bits.needs_replay || wb_uops_reg(i).bits.xcpt)) {
       io.dmem.s2_kill := true.B
     }
   }
@@ -880,20 +903,41 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     v.set_vstart.valid := set_vcfg
     v.set_vstart.bits := 0.U
     v.set_vs_dirty := (wb_retire zip wb_uops_reg).map { case (r,u) => r && u.bits.ctrl.vec }.orR
+
+    val io_v = io.vector.get
+    when (io_v.wb.retire_late || io_v.wb.xcpt) {
+      csr.io.pc := io_v.wb.pc
+      csr.io.retire := io_v.wb.retire_late
+      csr.io.inst(0) := io_v.wb.inst
+      when (io_v.wb.xcpt && !(wb_uops_reg(0).valid && wb_uops(0).bits.xcpt)) {
+        csr.io.exception := true.B
+        csr.io.tval := io_v.wb.tval
+        csr.io.cause := io_v.wb.cause
+      }
+    }
+
+    io_v.wb.vxrm := csr.io.vector.get.vxrm
+    io_v.wb.frm := csr.io.fcsr_rm
+    v.set_vxsat := io_v.set_vxsat
+
+    when (io_v.set_vconfig.valid) { v.set_vconfig := io_v.set_vconfig }
+    when (io_v.set_vstart.valid) { v.set_vstart := io_v.set_vstart }
   }
 
   val useDebugROB = coreParams.asInstanceOf[ShuttleCoreParams].debugROB
   if (useDebugROB) {
-    val csr_trace_with_wdata = WireInit(csr.io.trace)
+    val trace = WireInit(csr.io.trace)
     for (i <- 0 until retireWidth) {
-      csr_trace_with_wdata(i).valid := csr.io.trace(i).valid && !csr.io.trace.take(i).map(_.exception).orR
-      csr_trace_with_wdata(i).wdata.get := wb_uops(i).bits.wdata.bits
-      csr_trace_with_wdata(i).iaddr := wb_uops(i).bits.pc
+      val pc = if (usingVector) Mux(io.vector.get.wb.retire_late, io.vector.get.wb.pc, wb_uops(i).bits.pc) else wb_uops(i).bits.pc
+      trace(i).valid := csr.io.trace(i).valid && !csr.io.trace.take(i).map(_.exception).orR
+      trace(i).wdata.get := wb_uops(i).bits.wdata.bits
+      trace(i).iaddr := pc
       val ctrl = wb_uops(i).bits.ctrl
       val rd = wb_uops(i).bits.rd
+      val should_wb = !io.vector.map(_.wb.retire_late).getOrElse(false.B) && (ctrl.wfd || (ctrl.wxd && rd =/= 0.U)) && !csr.io.trace(i).exception
       DebugROB.pushTrace(clock, reset,
-        io.hartid, csr_trace_with_wdata(i),
-        (ctrl.wfd || (ctrl.wxd && rd =/= 0.U)) && !csr.io.trace(i).exception,
+        io.hartid, trace(i),
+        should_wb,
         ctrl.wxd && wb_uops(i).bits.wdata.valid,
         rd + Mux(ctrl.wfd, 32.U, 0.U))
       io.trace.insns(i) := DebugROB.popTrace(clock, reset, io.hartid)
@@ -917,7 +961,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
   csr.io.fcsr_flags.valid := false.B
   csr.io.set_fs_dirty.map(_ := false.B)
-  val csr_fcsr_flags = Wire(Vec(3, UInt(FPConstants.FLAGS_SZ.W)))
+  val csr_fcsr_flags = Wire(Vec(4, UInt(FPConstants.FLAGS_SZ.W)))
   csr_fcsr_flags.foreach(_ := 0.U)
   csr.io.fcsr_flags.bits := csr_fcsr_flags.reduce(_|_)
 
@@ -929,6 +973,29 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     }
     when (wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.rocc && !io.rocc.cmd.ready) {
       wb_uops(i).bits.needs_replay := true.B
+    }
+  }
+
+
+  if (usingVector) {
+    val sel = wb_uops_reg.map(u => u.valid && u.bits.ctrl.mem)
+    io.vector.get.wb.scalar_check.valid := sel.orR
+    io.vector.get.wb.scalar_check.bits.addr := RegEnable(dtlb.io.resp.paddr, mem_uops_reg.map(_.valid).orR)
+    io.vector.get.wb.scalar_check.bits.size := Mux1H(sel, mem_uops_reg.map(_.bits.mem_size))
+    io.vector.get.wb.scalar_check.bits.store := isWrite(Mux1H(sel, mem_uops_reg.map(_.bits.ctrl.mem_cmd)))
+    for (i <- 0 until retireWidth) {
+      when (io.vector.get.wb.scalar_check.valid && !io.vector.get.wb.scalar_check.ready && wb_uops_reg(i).bits.ctrl.mem) {
+        wb_uops(i).bits.needs_replay := true.B
+      }
+    }
+    for (i <- 0 until retireWidth) {
+      when (io.vector.get.wb.block_all) {
+        wb_uops(i).bits.needs_replay := true.B
+      }
+    }
+    when (io.vector.get.wb.internal_replay) {
+      kill_wb(0) := true.B
+      wb_uops.tail.foreach(_.bits.needs_replay := true.B)
     }
   }
   for (i <- 1 until retireWidth) {
@@ -970,6 +1037,8 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     csr_fcsr_flags(0) := wb_uops_reg(0).bits.fexc
   }
 
+  csr_fcsr_flags(3) := io.vector.map(v => Mux(v.set_fflags.valid, v.set_fflags.bits, 0.U)).getOrElse(0.U)
+
   io.imem.sfence.valid := false.B
   io.ptw.sfence := io.imem.sfence
   io.imem.sfence.bits.rs1 := wb_uops_reg(0).bits.mem_size(0)
@@ -1003,6 +1072,17 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     }
   }
 
+  if (usingVector) {
+    when (io.vector.get.wb.xcpt) {
+      io.imem.redirect_val := true.B
+      io.imem.redirect_flush := true.B
+      io.imem.redirect_pc := csr.io.evec
+      kill_mem := true.B
+      flush_rrd_ex := true.B
+      kill_wb.foreach(_ := true.B)
+    }
+  }
+
   // ll wb
   val dmem_xpu = !io.dmem.resp.bits.tag(0)
   val dmem_fpu =  io.dmem.resp.bits.tag(0)
@@ -1015,7 +1095,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   }
 
   // dmem, div, rocc
-  val ll_arb = Module(new Arbiter(new LLWB, 3))
+  val ll_arb = Module(new Arbiter(new LLWB, if (usingVector) 4 else 3))
   ll_arb.io.out.ready := true.B
 
   ll_arb.io.in(0).valid := io.dmem.resp.valid && io.dmem.resp.bits.has_data && dmem_xpu
@@ -1031,6 +1111,12 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   io.rocc.resp.ready := ll_arb.io.in(2).ready
   ll_arb.io.in(2).bits.waddr := io.rocc.resp.bits.rd
   ll_arb.io.in(2).bits.wdata := io.rocc.resp.bits.data
+
+  if (usingVector) {
+    ll_arb.io.in(3).valid := io.vector.get.resp.valid && !io.vector.get.resp.bits.fp
+    ll_arb.io.in(3).bits.waddr := io.vector.get.resp.bits.rd
+    ll_arb.io.in(3).bits.wdata := io.vector.get.resp.bits.data
+  }
 
   val ll_wen = ll_arb.io.out.valid
   val ll_waddr = ll_arb.io.out.bits.waddr
@@ -1057,6 +1143,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val ll_fp_wval = WireInit(fp_load_val)
   val ll_fp_wdata = WireInit(0.U(65.W))
   val ll_fp_waddr = WireInit(fp_load_addr)
+
   when (fp_load_val) {
     ll_fp_wval := true.B
     ll_fp_wdata := recode(fp_load_data, fp_load_type)
@@ -1069,6 +1156,18 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     csr.io.fcsr_flags.valid := true.B
     csr_fcsr_flags(1) := divSqrt_flags
   }
+
+  if (usingVector) {
+    io.vector.get.resp.ready := Mux(io.vector.get.resp.bits.fp,
+      !fp_load_val && !(divSqrt_val && divSqrt_wdata.valid),
+      ll_arb.io.in(3).ready)
+    when (!fp_load_val && (!divSqrt_val && divSqrt_wdata.valid)) {
+      ll_fp_wval := io.vector.get.resp.valid && io.vector.get.resp.bits.fp
+      ll_fp_wdata := recode(io.vector.get.resp.bits.data, io.vector.get.resp.bits.size - typeTagWbOffset)
+      ll_fp_waddr := io.vector.get.resp.bits.rd
+    }
+  }
+
 
   when (ll_fp_wval) {
     fregfile(ll_fp_waddr) := ll_fp_wdata

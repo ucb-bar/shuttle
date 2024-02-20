@@ -106,12 +106,19 @@ class ShuttleTile private(
   val dcache = LazyModule(new ShuttleDCache(tileId, ShuttleDCacheParams())(p))
   tlMasterXbar.node := TLBuffer() := TLWidthWidget(tileParams.dcache.get.rowBits/8) := dcache.node
 
+  val vector_unit = shuttleParams.core.vector.map(v => LazyModule(v.build(p)))
+  vector_unit.foreach(vu => tlMasterXbar.node :=* vu.atlNode)
+  vector_unit.foreach(vu => tlOtherMastersNode :=* vu.tlNode)
+
   override lazy val module = new ShuttleTileModuleImp(this)
 }
 
 class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
 {
   val core = Module(new ShuttleCore(outer, outer.dcache.module.edge)(outer.p))
+  outer.vector_unit.foreach { v =>
+    core.io.vector.get <> v.module.io
+  }
 
   val dcachePorts = Wire(Vec(2, new ShuttleDCacheIO))
   val ptwPorts = Wire(Vec(outer.nPTWPorts, new TLBPTWIO))
