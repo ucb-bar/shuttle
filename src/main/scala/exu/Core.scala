@@ -218,7 +218,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     val ctrl = uop.ctrl
     val inst = uop.inst
     val illegal_rm = inst(14,12).isOneOf(5.U, 6.U) || inst(14,12) === 7.U && csr.io.fcsr_rm >= 5.U
-    val fp_illegal = csr.io.decode(i).fp_illegal || illegal_rm
+    val fp_illegal = csr.io.decode(i).fp_illegal || (illegal_rm && !ctrl.vec)
     val csr_en = uop.csr_en
     val csr_ren = uop.csr_ren
     val csr_wen = uop.csr_wen
@@ -520,6 +520,9 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     v.ex.vstart := Mux(ex_vcfg.get.valid || mem_vcfg.get.valid || wb_vcfg.get.valid, 0.U, csr.io.vector.get.vstart)
     v.ex.fire := !ex_stall && !flush_rrd_ex
     v.ex.uop := ex_uops_reg(0).bits
+    when (ex_uops_reg(0).bits.ctrl.rfs1) {
+      v.ex.uop.rs1_data := fp_pipe.io.frs1_data
+    }
   }
   val ex_vec_hazard = io.vector.map { v => v.ex.valid && !v.ex.ready }.getOrElse(false.B)
 
@@ -677,6 +680,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     v.mem.tlb_req.ready := !mem_dmem_uop.valid
     v.mem.tlb_resp := dtlb.io.resp
     v.mem.kill := kill_mem
+    v.mem.frs1 := fp_pipe.io.s1_store_data
   }
 
   io.dmem.keep_clock_enabled := true.B
