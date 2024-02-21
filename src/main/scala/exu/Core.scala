@@ -135,7 +135,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     mem_vcfg.get.valid := ex_vcfg_out.get.valid && !flush_rrd_ex && !ex_stall
 
     when (mem_vcfg.get.valid) { wb_vcfg.get.bits := mem_vcfg.get.bits }
-    wb_vcfg.get.valid := wb_vcfg.get.valid && !kill_mem
+    wb_vcfg.get.valid := mem_vcfg.get.valid && !kill_mem
   }
 
   io.imem.redirect_val := false.B
