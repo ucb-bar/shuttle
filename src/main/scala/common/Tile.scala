@@ -17,6 +17,14 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.prci.ClockSinkParameters
 
+case class ShuttleTCMParams(
+  base: BigInt,
+  size: BigInt,
+  banks: Int,
+  beatBytes: Int) {
+  def addressSet = AddressSet(base, size-1)
+}
+
 import shuttle.ifu._
 import shuttle.exu._
 import shuttle.dmem._
@@ -28,6 +36,7 @@ case class ShuttleTileParams(
   trace: Boolean = false,
   name: Option[String] = Some("shuttle_tile"),
   btb: Option[BTBParams] = Some(BTBParams()),
+  tcm: Option[ShuttleTCMParams] = None,
   tileId: Int = 0) extends InstantiableTileParams[ShuttleTile]
 {
   require(icache.isDefined)
@@ -71,10 +80,6 @@ class ShuttleTile private(
   val masterNode = visibilityNode
   val slaveNode = TLIdentityNode()
 
-  tlOtherMastersNode := TLBuffer() := tlMasterXbar.node
-  masterNode :=* tlOtherMastersNode
-
-
   val cpuDevice: SimpleDevice = new SimpleDevice("cpu", Seq("ucb-bar,shuttle", "riscv")) {
     override def parent = Some(ResourceAnchors.cpus)
     override def describe(resources: ResourceBindings): Description = {
@@ -102,13 +107,35 @@ class ShuttleTile private(
   frontend.resetVectorSinkNode := resetVectorNexusNode
 
   val nPTWPorts = 2+ roccs.map(_.nPTWPorts).sum
-
   val dcache = LazyModule(new ShuttleDCache(tileId, ShuttleDCacheParams())(p))
   tlMasterXbar.node := TLBuffer() := TLWidthWidget(tileParams.dcache.get.rowBits/8) := dcache.node
+
 
   val vector_unit = shuttleParams.core.vector.map(v => LazyModule(v.build(p)))
   vector_unit.foreach(vu => tlMasterXbar.node :=* vu.atlNode)
   vector_unit.foreach(vu => tlOtherMastersNode :=* vu.tlNode)
+
+  shuttleParams.tcm.foreach { tcmParams =>
+    val device = new MemoryDevice
+    for (b <- 0 until tcmParams.banks) {
+      val base = tcmParams.base + b * p(CacheBlockBytes)
+      val mask = tcmParams.size - 1 - (tcmParams.banks - 1) * p(CacheBlockBytes)
+      val tcm = LazyModule(new TLRAM(
+        address = AddressSet(base, mask),
+        beatBytes = tcmParams.beatBytes,
+        devOverride = Some(device)))
+      connectTLSlave(tcm.node := TLAtomicAutomata(), tcmParams.beatBytes)
+    }
+    tlSlaveXbar.node := slaveNode
+    tlSlaveXbar.node := tlMasterXbar.node
+  }
+
+  (tlOtherMastersNode
+    := TLBuffer()
+    := TLFilter(TLFilter.mSubtract(shuttleParams.tcm.map(_.addressSet).toSeq))
+    := tlMasterXbar.node)
+  masterNode :=* tlOtherMastersNode
+
 
   override lazy val module = new ShuttleTileModuleImp(this)
 }
