@@ -339,7 +339,6 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   // replays
   val replay_bank_mask = UIntToOH(bankIdx(mshrs.io.replay.bits.addr))
   val block_replay = WireInit(false.B)
-  val block_replay_ctr = RegInit(0.U(3.W))
   val replay_skips_read = isPrefetch(mshrs.io.replay.bits.cmd) || (
     isWrite(mshrs.io.replay.bits.cmd) && !isRead(mshrs.io.replay.bits.cmd) &&
       ~(new StoreGen(mshrs.io.replay.bits.size, mshrs.io.replay.bits.addr, 0.U, xLen/8).mask) === 0.U
@@ -358,11 +357,6 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   }
   when (isWrite(mshrs.io.replay.bits.cmd) && io.req.fire() && isWrite(io.req.bits.cmd)) {
     block_replay := true.B
-  }
-  when (block_replay) {
-    block_replay_ctr := block_replay_ctr + 1.U
-  } .otherwise {
-    block_replay_ctr := 0.U
   }
 
   // probes and releases
