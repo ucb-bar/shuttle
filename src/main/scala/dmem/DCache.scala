@@ -344,7 +344,7 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
     isWrite(mshrs.io.replay.bits.cmd) && !isRead(mshrs.io.replay.bits.cmd) &&
       ~(new StoreGen(mshrs.io.replay.bits.size, mshrs.io.replay.bits.addr, 0.U, xLen/8).mask) === 0.U
   )
-  mshrs.io.replay.ready := !(block_replay && block_replay_ctr =/= 7.U)
+  mshrs.io.replay.ready := !block_replay
   readArbs.zipWithIndex.foreach(t => t._1.io.in(1).valid := mshrs.io.replay.valid && replay_bank_mask(t._2) && !replay_skips_read)
   readArbs.foreach(_.io.in(1).bits.addr := mshrs.io.replay.bits.addr)
   readArbs.foreach(_.io.in(1).bits.way_en := ~(0.U(nWays.W)))
