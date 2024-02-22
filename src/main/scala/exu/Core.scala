@@ -564,7 +564,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     ex_bypasses(i).valid := ex_uops_reg(i).valid && ctrl.wxd
     ex_bypasses(i).dst := uop.rd
     ex_bypasses(i).can_bypass := uop.uses_alu && !uop.uses_memalu
-    ex_bypasses(i).data := alu.io.out
+    ex_bypasses(i).data := Mux(uop.sets_vcfg, ex_new_vl.getOrElse(alu.io.out), alu.io.out)
 
     ex_dmem_addrs(i) := encodeVirtualAddress(uop.rs1_data, alu.io.adder_out)
 
