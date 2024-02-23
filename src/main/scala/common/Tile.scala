@@ -20,8 +20,7 @@ import freechips.rocketchip.prci.ClockSinkParameters
 case class ShuttleTCMParams(
   base: BigInt,
   size: BigInt,
-  banks: Int,
-  beatBytes: Int) {
+  banks: Int) {
   def addressSet = AddressSet(base, size-1)
 }
 
@@ -37,7 +36,8 @@ case class ShuttleTileParams(
   name: Option[String] = Some("shuttle_tile"),
   btb: Option[BTBParams] = Some(BTBParams()),
   tcm: Option[ShuttleTCMParams] = None,
-  tileId: Int = 0) extends InstantiableTileParams[ShuttleTile]
+  tileId: Int = 0,
+  tileBeatBytes: Int = 8) extends InstantiableTileParams[ShuttleTile]
 {
   require(icache.isDefined)
   def instantiate(crossing: HierarchicalElementCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters): ShuttleTile = {
@@ -122,9 +122,9 @@ class ShuttleTile private(
       val mask = tcmParams.size - 1 - (tcmParams.banks - 1) * p(CacheBlockBytes)
       val tcm = LazyModule(new TLRAM(
         address = AddressSet(base, mask),
-        beatBytes = tcmParams.beatBytes,
+        beatBytes = shuttleParams.tileBeatBytes,
         devOverride = Some(device)))
-      connectTLSlave(tcm.node := TLAtomicAutomata(), tcmParams.beatBytes)
+      tcm.node := TLAtomicAutomata() := TLFragmenter(shuttleParams.tileBeatBytes, p(CacheBlockBytes)) := tlSlaveXbar.node
     }
     tlSlaveXbar.node := slaveNode
     tlSlaveXbar.node := tlMasterXbar.node
@@ -133,6 +133,7 @@ class ShuttleTile private(
   (tlOtherMastersNode
     := TLBuffer()
     := TLFilter(TLFilter.mSubtract(shuttleParams.tcm.map(_.addressSet).toSeq))
+    := TLWidthWidget(shuttleParams.tileBeatBytes)
     := tlMasterXbar.node)
   masterNode :=* tlOtherMastersNode
 

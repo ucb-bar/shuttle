@@ -107,10 +107,19 @@ class WithL1DCacheMSHRs(n: Int) extends Config((site, here, up) => {
   }
 })
 
-class WithTCM(tcmParams: ShuttleTCMParams = ShuttleTCMParams(0x70000000L, (64L << 10), 4, 16)) extends Config((site, here, up) => {
+class WithTCM(address: BigInt = 0x70000000L, size: BigInt = 64L << 10, banks: Int = 4) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
-      tcm = Some(tcmParams)
+      tcm = Some(ShuttleTCMParams(address, size, banks))
+    ))
+    case other => other
+  }
+})
+
+class WithShuttleTileBeatBytes(beatBytes: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      tileBeatBytes = beatBytes
     ))
     case other => other
   }
