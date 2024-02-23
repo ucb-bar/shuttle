@@ -21,7 +21,7 @@ case class ShuttleTCMParams(
   base: BigInt,
   size: BigInt,
   banks: Int) {
-  def addressSet = AddressSet(base, size-1)
+  def addressSet(tileId: Int) = AddressSet(base + size * tileId, size-1)
 }
 
 import shuttle.ifu._
@@ -118,7 +118,7 @@ class ShuttleTile private(
   shuttleParams.tcm.foreach { tcmParams =>
     val device = new MemoryDevice
     for (b <- 0 until tcmParams.banks) {
-      val base = tcmParams.base + b * p(CacheBlockBytes)
+      val base = tcmParams.base + b * p(CacheBlockBytes) + tileId * tcmParams.size
       val mask = tcmParams.size - 1 - (tcmParams.banks - 1) * p(CacheBlockBytes)
       val tcm = LazyModule(new TLRAM(
         address = AddressSet(base, mask),
@@ -132,7 +132,7 @@ class ShuttleTile private(
 
   (tlOtherMastersNode
     := TLBuffer()
-    := TLFilter(TLFilter.mSubtract(shuttleParams.tcm.map(_.addressSet).toSeq))
+    := TLFilter(TLFilter.mSubtract(shuttleParams.tcm.map(_.addressSet(tileId)).toSeq))
     := TLWidthWidget(shuttleParams.tileBeatBytes)
     := tlMasterXbar.node)
   masterNode :=* tlOtherMastersNode
