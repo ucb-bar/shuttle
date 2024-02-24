@@ -32,8 +32,8 @@ class ShuttleVectorCoreIO(implicit p: Parameters) extends CoreBundle()(p) {
 
   val mem = new Bundle {
     val kill = Input(Bool())
-    val tlb_req = Decoupled(new TLBReq(3))
-    val tlb_resp = Input(new TLBResp)
+    val tlb_req = Decoupled(new ShuttleDTLBReq(3))
+    val tlb_resp = Input(new ShuttleDTLBResp)
     val frs1 = Input(UInt(fLen.W))
   }
 
