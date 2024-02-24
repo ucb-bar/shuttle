@@ -230,7 +230,6 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
     val ptw_s2_addr = Pipe(ptw.io.mem.req.fire, ptw.io.mem.req.bits.addr, 2).bits
     val ptw_s2_legal = edge.manager.findSafe(ptw_s2_addr).reduce(_||_)
     ptw.io.mem.s2_paddr := ptw_s2_addr
-    println(edge.manager.managers.map(_.address))
     ptw.io.mem.s2_xcpt.ae.ld := !(ptw_s2_legal &&
       edge.manager.fastProperty(ptw_s2_addr, p => TransferSizes.asBool(p.supportsGet), (b: Boolean) => b.B))
     ptw.io.mem.s2_xcpt.ae.st := false.B
