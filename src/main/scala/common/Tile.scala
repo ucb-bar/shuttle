@@ -21,7 +21,7 @@ case class ShuttleTCMParams(
   base: BigInt,
   size: BigInt,
   banks: Int) {
-  def addressSet(tileId: Int) = AddressSet(base + size * tileId, size-1)
+  def addressSet = AddressSet(base, size-1)
 }
 
 import shuttle.ifu._
@@ -94,31 +94,49 @@ class ShuttleTile private(
   ResourceBinding {
     Resource(cpuDevice, "reg").bind(ResourceAddress(tileId))
   }
+
+  def tcmAdjusterNode = shuttleParams.tcm.map { tcmParams =>
+    val replicationSize = (1 << log2Ceil(p(NumTiles))) * tcmParams.size
+    val tcm_adjuster = LazyModule(new AddressOffsetter(tcmParams.size-1, replicationSize))
+    InModuleBody { tcm_adjuster.module.io.base := tcmParams.base.U + tcmParams.size.U * hartIdSinkNode.bundle }
+    tcm_adjuster.node
+  } .getOrElse {
+    val node = TLEphemeralNode()
+    node
+  }
+
   val roccs = p(BuildRoCC).map(_(p))
 
-  roccs.map(_.atlNode).foreach { atl => tlMasterXbar.node :=* atl }
+  roccs.map(_.atlNode).foreach { atl => tlMasterXbar.node :=* tcmAdjusterNode :=* atl }
   roccs.map(_.tlNode).foreach { tl => tlOtherMastersNode :=* tl }
   val roccCSRs = roccs.map(_.roccCSRs)
   require(roccCSRs.flatten.map(_.id).toSet.size == roccCSRs.flatten.size,
     "LazyRoCC instantiations require overlapping CSRs")
 
   val frontend = LazyModule(new ShuttleFrontend(tileParams.icache.get, tileId))
-  tlMasterXbar.node := TLBuffer() := TLWidthWidget(tileParams.icache.get.fetchBytes) := frontend.masterNode
+  (tlMasterXbar.node
+    := tcmAdjusterNode
+    := TLBuffer()
+    := TLWidthWidget(tileParams.icache.get.fetchBytes)
+    := frontend.masterNode)
   frontend.resetVectorSinkNode := resetVectorNexusNode
 
-  val nPTWPorts = 2+ roccs.map(_.nPTWPorts).sum
+  val nPTWPorts = 2 + roccs.map(_.nPTWPorts).sum
   val dcache = LazyModule(new ShuttleDCache(tileId, ShuttleDCacheParams())(p))
-  tlMasterXbar.node := TLBuffer() := TLWidthWidget(tileParams.dcache.get.rowBits/8) := dcache.node
-
+  (tlMasterXbar.node
+    := tcmAdjusterNode
+    := TLBuffer()
+    := TLWidthWidget(tileParams.dcache.get.rowBits/8)
+    := dcache.node)
 
   val vector_unit = shuttleParams.core.vector.map(v => LazyModule(v.build(p)))
-  vector_unit.foreach(vu => tlMasterXbar.node :=* vu.atlNode)
+  vector_unit.foreach(vu => tlMasterXbar.node :=* tcmAdjusterNode :=* vu.atlNode)
   vector_unit.foreach(vu => tlOtherMastersNode :=* vu.tlNode)
 
-  shuttleParams.tcm.foreach { tcmParams =>
+  shuttleParams.tcm.foreach { tcmParams => DisableMonitors { implicit p =>
     val device = new MemoryDevice
     for (b <- 0 until tcmParams.banks) {
-      val base = tcmParams.base + b * p(CacheBlockBytes) + tileId * tcmParams.size
+      val base = tcmParams.base + b * p(CacheBlockBytes)
       val mask = tcmParams.size - 1 - (tcmParams.banks - 1) * p(CacheBlockBytes)
       val tcm = LazyModule(new TLRAM(
         address = AddressSet(base, mask),
@@ -126,15 +144,36 @@ class ShuttleTile private(
         devOverride = Some(device)))
       tcm.node := TLAtomicAutomata() := TLFragmenter(shuttleParams.tileBeatBytes, p(CacheBlockBytes)) := tlSlaveXbar.node
     }
-    tlSlaveXbar.node := slaveNode
-    tlSlaveXbar.node := tlMasterXbar.node
-  }
+    val replicationSize = (1 << log2Ceil(p(NumTiles))) * tcmParams.size
+    val tcm_master_replicator = LazyModule(new RegionReplicator(ReplicatedRegion(
+      tcmParams.addressSet,
+      tcmParams.addressSet.widen((replicationSize << 1) - tcmParams.size)
+    )))
+    val tcm_slave_replicator = LazyModule(new RegionReplicator(ReplicatedRegion(
+      tcmParams.addressSet,
+      tcmParams.addressSet.widen(replicationSize - tcmParams.size)
+    )))
+    val prefix_slave_source = BundleBridgeSource[UInt](() => UInt(1.W))
+    tcm_slave_replicator.prefix := prefix_slave_source
+    val prefix_master_source = BundleBridgeSource[UInt](() => UInt(1.W))
+    tcm_master_replicator.prefix := prefix_master_source
+    InModuleBody { prefix_slave_source.bundle := 0.U }
+    InModuleBody { prefix_master_source.bundle := 0.U }
+    (tlSlaveXbar.node
+      := tcm_slave_replicator.node
+      := TLFilter(TLFilter.mSelectIntersect(AddressSet(tcmParams.base + tileId * tcmParams.size, tcmParams.size-1)))
+      := slaveNode)
+    (tlSlaveXbar.node
+      := tcm_master_replicator.node
+      := TLFilter(TLFilter.mSubtract(AddressSet(tcmParams.base, replicationSize-1)))
+      := tlMasterXbar.node)
+  }}
 
-  (tlOtherMastersNode
+  DisableMonitors { implicit p => (tlOtherMastersNode
     := TLBuffer()
-    := TLFilter(TLFilter.mSubtract(shuttleParams.tcm.map(_.addressSet(tileId)).toSeq))
     := TLWidthWidget(shuttleParams.tileBeatBytes)
     := tlMasterXbar.node)
+  }
   masterNode :=* tlOtherMastersNode
 
 
@@ -191,6 +230,7 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
     val ptw_s2_addr = Pipe(ptw.io.mem.req.fire, ptw.io.mem.req.bits.addr, 2).bits
     val ptw_s2_legal = edge.manager.findSafe(ptw_s2_addr).reduce(_||_)
     ptw.io.mem.s2_paddr := ptw_s2_addr
+    println(edge.manager.managers.map(_.address))
     ptw.io.mem.s2_xcpt.ae.ld := !(ptw_s2_legal &&
       edge.manager.fastProperty(ptw_s2_addr, p => TransferSizes.asBool(p.supportsGet), (b: Boolean) => b.B))
     ptw.io.mem.s2_xcpt.ae.st := false.B
