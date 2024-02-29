@@ -471,7 +471,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val ex_new_vl = if (usingVector) {
     val ex_avl = Mux(ex_setvcfg_uop.ctrl.rxs1,
       Mux(ex_setvcfg_uop.inst(19,15) === 0.U,
-        Mux(ex_setvcfg_uop.inst(11,6) === 0.U, ex_vcfg.get.bits.vl, ~(0.U(log2Ceil(maxVLMax).W))),
+        Mux(ex_setvcfg_uop.inst(11,6) === 0.U, ex_vcfg.get.bits.vl, ~(0.U((1+log2Ceil(maxVLMax)).W))),
         ex_setvcfg_uop.rs1_data,
       ),
       ex_setvcfg_uop.inst(19,15))
