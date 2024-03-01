@@ -214,5 +214,5 @@ class ShuttleICacheModule(outer: ShuttleICache) extends LazyModuleImp(outer)
     msbs ## lsbs
   }
 
-  dontTouch(io)
+  //dontTouch(io)
 }

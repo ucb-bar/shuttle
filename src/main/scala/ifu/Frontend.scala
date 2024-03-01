@@ -378,5 +378,5 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
     jump_to_reset := false.B
   }
 
-  dontTouch(io)
+  //dontTouch(io)
 }
