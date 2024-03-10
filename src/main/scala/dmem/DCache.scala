@@ -357,6 +357,7 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   }
   when (isWrite(mshrs.io.replay.bits.cmd) && io.req.fire() && isWrite(io.req.bits.cmd)) {
     block_replay := true.B
+    force_stall := true.B
   }
 
   // probes and releases
