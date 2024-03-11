@@ -517,7 +517,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     v.status := csr.io.status
     v.ex.valid := ex_uops_reg(0).valid && ex_uops_reg(0).bits.ctrl.vec && !ex_uops_reg(0).bits.xcpt
     v.ex.vconfig := ex_vcfg.get.bits
-    v.ex.vstart := Mux(ex_vcfg.get.valid || mem_vcfg.get.valid || wb_vcfg.get.valid, 0.U, csr.io.vector.get.vstart)
+    v.ex.vstart := Mux(mem_vcfg.get.valid || wb_vcfg.get.valid, 0.U, csr.io.vector.get.vstart)
     v.ex.fire := !ex_stall && !flush_rrd_ex
     v.ex.uop := ex_uops_reg(0).bits
     when (ex_uops_reg(0).bits.ctrl.rfs1) {
