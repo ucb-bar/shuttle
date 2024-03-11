@@ -245,6 +245,16 @@ class ShuttleDTLB(ports: Int, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: TLE
     val eff_array = Cat(Fill(nPhysicalEntries, prot_eff), normal_entries.map(_.eff).asUInt)
     // cacheable
     val c_array = Cat(Fill(nPhysicalEntries, cacheable), normal_entries.map(_.c).asUInt)
+    // put partial
+    val ppp_array = Cat(Fill(nPhysicalEntries, prot_pp), normal_entries.map(_.ppp).asUInt)
+    // atomic arithmetic
+    val paa_array = Cat(Fill(nPhysicalEntries, prot_aa), normal_entries.map(_.paa).asUInt)
+    // atomic logic
+    val pal_array = Cat(Fill(nPhysicalEntries, prot_al), normal_entries.map(_.pal).asUInt)
+    val ppp_array_if_cached = ppp_array | c_array
+    val paa_array_if_cached = paa_array | c_array
+    val pal_array_if_cached = pal_array | c_array
+
 
     // vaddr misaligned: vaddr[1:0]=b00
     val misaligned = (io.req(i).bits.vaddr & (UIntToOH(io.req(i).bits.size) - 1.U)).orR
@@ -282,14 +292,14 @@ class ShuttleDTLB(ports: Int, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: TLE
     val ae_ld_array = Mux(cmd_read, ae_array | ~pr_array, 0.U)
     val ae_st_array =
       Mux(cmd_write_perms, ae_array | ~pw_array, 0.U) |
-      Mux(cmd_put_partial, ~c_array, 0.U) |
-      Mux(cmd_amo_logical, ~c_array, 0.U) |
-      Mux(cmd_amo_arithmetic, ~c_array, 0.U)
+      Mux(cmd_put_partial, ~ppp_array_if_cached, 0.U) |
+      Mux(cmd_amo_logical, ~pal_array_if_cached, 0.U) |
+      Mux(cmd_amo_arithmetic, ~paa_array_if_cached, 0.U)
     val must_alloc_array =
-      Mux(cmd_put_partial, ~c_array, 0.U) |
-      Mux(cmd_amo_logical, ~c_array, 0.U) |
-      Mux(cmd_amo_arithmetic, ~c_array, 0.U) |
-      Mux(cmd_lrsc, ~0.U(c_array.getWidth.W), 0.U)
+      Mux(cmd_put_partial, ~ppp_array, 0.U) |
+      Mux(cmd_amo_logical, ~pal_array, 0.U) |
+      Mux(cmd_amo_arithmetic, ~paa_array, 0.U) |
+      Mux(cmd_lrsc, ~0.U(pal_array.getWidth.W), 0.U)
     val pf_ld_array = Mux(cmd_read, ((~r_array & ~ptw_ae_array) | ptw_pf_array) & ~ptw_gf_array, 0.U)
     val pf_st_array = Mux(cmd_write_perms, ((~w_array & ~ptw_ae_array) | ptw_pf_array) & ~ptw_gf_array, 0.U)
 
