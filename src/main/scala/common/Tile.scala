@@ -15,7 +15,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.util._
 import freechips.rocketchip.tile._
-import freechips.rocketchip.prci.ClockSinkParameters
+import freechips.rocketchip.prci._
 
 case class ShuttleTCMParams(
   base: BigInt,
@@ -53,10 +53,18 @@ case class ShuttleTileParams(
   val uniqueName = s"${baseName}_$tileId"
 }
 
+case class ShuttleCrossingParams(
+  crossingType: ClockCrossingType = SynchronousCrossing(),
+  master: HierarchicalElementPortParamsLike = HierarchicalElementMasterPortParams(),
+  slave: HierarchicalElementSlavePortParams = HierarchicalElementSlavePortParams(where=SBUS),
+  mmioBaseAddressPrefixWhere: TLBusWrapperLocation = SBUS,
+  resetCrossingType: ResetCrossingType = NoResetCrossing(),
+  forceSeparateClockReset: Boolean = false
+) extends HierarchicalElementCrossingParamsLike
 
 case class ShuttleTileAttachParams(
   tileParams: ShuttleTileParams,
-  crossingParams: RocketCrossingParams
+  crossingParams: ShuttleCrossingParams
 ) extends CanAttachTile {
   type TileType = ShuttleTile
   val lookup = PriorityMuxHartIdFromSeq(Seq(tileParams))

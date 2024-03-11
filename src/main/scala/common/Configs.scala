@@ -24,7 +24,7 @@ class WithNShuttleCores(n: Int = 1, retireWidth: Int = 2) extends Config((site, 
             ),
             tileId = i + idOffset
           ),
-          crossingParams = RocketCrossingParams()
+          crossingParams = ShuttleCrossingParams()
         )
       } ++ prev
     }
