@@ -46,7 +46,7 @@ case class ShuttleTileParams(
 
   val beuAddr: Option[BigInt] = None
   val blockerCtrlAddr: Option[BigInt] = None
-  val dcache = Some(DCacheParams(rowBits=64, nSets=dcacheParams.nSets, nWays=dcacheParams.nWays, nMSHRs=dcacheParams.nMSHRs))
+  val dcache = Some(DCacheParams(rowBits=64, nSets=dcacheParams.nSets, nWays=dcacheParams.nWays, nMSHRs=dcacheParams.nMSHRs, nMMIOs=dcacheParams.nMMIOs))
   val boundaryBuffers: Boolean = false // if synthesized with hierarchical PnR, cut feed-throughs?
   val clockSinkParams: ClockSinkParameters = ClockSinkParameters()
   val baseName = name.getOrElse("shuttle_tile")

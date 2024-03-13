@@ -16,6 +16,7 @@ case class ShuttleDCacheParams(
   nSets: Int = 64,
   nWays: Int = 4,
   nMSHRs: Int = 4,
+  nMMIOs: Int = 1,
   nBanks: Int = 4,
   nTagBanks: Int = 4,
   singlePorted: Boolean = true,

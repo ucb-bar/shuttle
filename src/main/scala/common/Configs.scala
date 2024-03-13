@@ -107,6 +107,15 @@ class WithL1DCacheMSHRs(n: Int) extends Config((site, here, up) => {
   }
 })
 
+class WithL1DCacheIOMSHRs(n: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      dcacheParams = tp.tileParams.dcacheParams.copy(nMMIOs = n)
+    ))
+    case other => other
+  }
+})
+
 class WithTCM(address: BigInt = 0x70000000L, size: BigInt = 64L << 10, banks: Int = 4) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
