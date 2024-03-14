@@ -377,7 +377,8 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     val uop = rrd_uops(i).bits
     val ctrl = uop.ctrl
     val vec_bsy = io.vector.map(v => v.backend_busy || v.trap_check_busy).getOrElse(false.B)
-    val rrd_fence_stall = (i == 0).B && ((uop.system_insn || ctrl.fence || uop.sfence || ctrl.fence_i) &&
+    val amo_fence = ctrl.amo && uop.inst(26,25) =/= 0.U
+    val rrd_fence_stall = (i == 0).B && ((uop.system_insn || ctrl.fence || uop.sfence || ctrl.fence_i || amo_fence) &&
       (ex_bsy || mem_bsy || wb_bsy || isboard_bsy || fsboard_bsy || !io.dmem.ordered || io.rocc.busy || vec_bsy))
     val rrd_rocc_stall = (i == 0).B && ctrl.rocc && !io.rocc.cmd.ready
     val is_pipe0 = (uop.system_insn
