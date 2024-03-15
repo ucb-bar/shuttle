@@ -569,7 +569,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
     ex_bypasses(i).valid := ex_uops_reg(i).valid && ctrl.wxd
     ex_bypasses(i).dst := uop.rd
-    ex_bypasses(i).can_bypass := uop.uses_alu && !uop.uses_memalu
+    ex_bypasses(i).can_bypass := uop.uses_alu && !uop.uses_memalu && !uop.sfb_shadow
     ex_bypasses(i).data := Mux(uop.sets_vcfg, ex_new_vl.getOrElse(alu.io.out), alu.io.out)
 
     ex_dmem_addrs(i) := encodeVirtualAddress(uop.rs1_data, alu.io.adder_out)
@@ -732,7 +732,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
     mem_bypasses(i).valid := mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.wxd
     mem_bypasses(i).dst := mem_uops_reg(i).bits.rd
-    mem_bypasses(i).can_bypass := mem_uops_reg(i).bits.wdata.valid
+    mem_bypasses(i).can_bypass := mem_uops_reg(i).bits.wdata.valid && !mem_uops_reg(i).bits.sfb_shadow
     mem_bypasses(i).data := mem_uops_reg(i).bits.wdata.bits
 
     fp_mem_bypasses(i).valid := mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.wfd
