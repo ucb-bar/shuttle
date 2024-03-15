@@ -149,8 +149,9 @@ class ShuttleTile private(
       val tcm = LazyModule(new TLRAM(
         address = AddressSet(base, mask),
         beatBytes = shuttleParams.tileBeatBytes,
+        atomics = true,
         devOverride = Some(device)))
-      tcm.node := TLAtomicAutomata() := TLFragmenter(shuttleParams.tileBeatBytes, p(CacheBlockBytes)) := tlSlaveXbar.node
+      tcm.node := TLFragmenter(shuttleParams.tileBeatBytes, p(CacheBlockBytes)) := tlSlaveXbar.node
     }
     val replicationSize = (1 << log2Ceil(p(NumTiles))) * tcmParams.size
     val tcm_master_replicator = LazyModule(new RegionReplicator(ReplicatedRegion(
