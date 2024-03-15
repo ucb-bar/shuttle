@@ -299,6 +299,8 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     val rs2 = rrd_uops(i).bits.rs2
     val rs3 = rrd_uops(i).bits.rs3
     val rd = rrd_uops(i).bits.rd
+    val sfb_shadow = (i == 1).B && rrd_uops(0).bits.sfb_br
+
     val (rs1_older_hazard, rs1_data) = bypass(int_bypasses, rs1, isboard(rs1), iregfile(rs1))
     val (rs2_older_hazard, rs2_data) = bypass(int_bypasses, rs2, isboard(rs2), iregfile(rs2))
     val (rd_older_hazard , _)        = bypass(int_bypasses, rd , isboard(rd) , 0.U(1.W))
@@ -344,7 +346,8 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     val frd_same_hazard  = (i == 0).B && rrd_uops.take(i).map { u => u.valid && u.bits.ctrl.wfd && u.bits.rd === rd  }.orR && ctrl.wfd
 
     rrd_stall_data(i) := (rs1_data_hazard || rs2_data_hazard || rd_data_hazard || frs1_same_hazard || frs2_same_hazard || frs3_same_hazard || frd_same_hazard)
-    rrd_uops(i).bits.uses_memalu := rrd_uops(i).bits.uses_alu && ((rs1_w0_hit && rs1_can_forward_from_x_p0) || (rs2_w0_hit && rs2_can_forward_from_x_p0)) && enableMemALU.B
+    rrd_uops(i).bits.uses_memalu := rrd_uops(i).bits.uses_alu && ((rs1_w0_hit && rs1_can_forward_from_x_p0) || (rs2_w0_hit && rs2_can_forward_from_x_p0)) && enableMemALU.B && !sfb_shadow
+    rrd_uops(i).bits.sfb_shadow := sfb_shadow
 
     rrd_irf_writes(i).valid := rrd_uops(i).valid && rrd_uops(i).bits.ctrl.wxd
     rrd_irf_writes(i).bits := rrd_uops(i).bits.rd
@@ -382,6 +385,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       (ex_bsy || mem_bsy || wb_bsy || isboard_bsy || fsboard_bsy || !io.dmem.ordered || io.rocc.busy || vec_bsy))
     val rrd_rocc_stall = (i == 0).B && ctrl.rocc && !io.rocc.cmd.ready
     val is_pipe0 = (uop.system_insn
+      || uop.sfb_br
       || ctrl.vec
       || ctrl.fence
       || ctrl.amo

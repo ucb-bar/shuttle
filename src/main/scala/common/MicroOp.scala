@@ -21,6 +21,8 @@ class ShuttleUOP(implicit p: Parameters) extends CoreBundle {
   val sets_vcfg = Bool()
 
   val btb_resp = Valid(new BTBResp)
+  val sfb_br = Bool()
+  val sfb_shadow = Bool()
   val next_pc = Valid(UInt(vaddrBitsExtended.W))
   val ras_head = UInt(log2Ceil(nRAS).W)
   val taken = Bool()

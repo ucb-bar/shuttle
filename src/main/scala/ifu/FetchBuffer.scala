@@ -5,8 +5,10 @@ import chisel3.util._
 
 import freechips.rocketchip.tile._
 import freechips.rocketchip.rocket._
-import org.chipsalliance.cde.config.{Parameters}
+import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.rocket.{MStatus, BP, BreakpointUnit}
+import freechips.rocketchip.util._
+import org.chipsalliance.cde.config.{Parameters}
 
 import shuttle.common._
 import shuttle.util._
@@ -45,6 +47,8 @@ class ShuttleFetchBuffer(implicit p: Parameters) extends CoreModule
     in_uops(i).bits.inst           := io.enq.bits.exp_insts(i)
     in_uops(i).bits.raw_inst       := io.enq.bits.insts(i)
     in_uops(i).bits.rvc            := io.enq.bits.insts(i)(1,0) =/= 3.U
+    val cond_br = Seq(BNE, BGE, BGEU, BEQ, BLT, BLTU).map(_ === io.enq.bits.exp_insts(i)).orR
+    in_uops(i).bits.sfb_br         := cond_br && ImmGen(IMM_SB, io.enq.bits.exp_insts(i)) === 2.S && !io.enq.bits.next_pc.valid
     in_uops(i).bits.btb_resp       := io.enq.bits.btb_resp
     in_uops(i).bits.next_pc.valid  := io.enq.bits.next_pc.valid && maybe_cfi_mask(i)
     in_uops(i).bits.next_pc.bits   := io.enq.bits.next_pc.bits
