@@ -123,6 +123,8 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
   val dcachePorts = ListBuffer[HellaCacheIO]()
   val ptwPorts = ListBuffer(outer.dcache.module.io.ptw)
 
+  outer.dcache.module.io.tlb_port := DontCare
+
   val ptw = Module(new PTW(outer.nPTWPorts)(outer.dcache.node.edges.out(0), outer.p))
   if (outer.usingPTW) {
     dcachePorts += ptw.io.mem
