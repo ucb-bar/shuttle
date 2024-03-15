@@ -385,6 +385,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       (ex_bsy || mem_bsy || wb_bsy || isboard_bsy || fsboard_bsy || !io.dmem.ordered || io.rocc.busy || vec_bsy))
     val rrd_rocc_stall = (i == 0).B && ctrl.rocc && !io.rocc.cmd.ready
     val is_pipe0 = (uop.system_insn
+      || (uop.sfb_shadow && (!uop.uses_alu || uop.uses_brjmp))
       || uop.sfb_br
       || ctrl.vec
       || ctrl.fence
