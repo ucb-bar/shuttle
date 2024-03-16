@@ -386,6 +386,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     val rrd_rocc_stall = (i == 0).B && ctrl.rocc && !io.rocc.cmd.ready
     val is_pipe0 = (uop.system_insn
       || (uop.sfb_shadow && (!uop.uses_alu || uop.uses_brjmp))
+      || (uop.sfb_shadow && !uop.rvc)
       || uop.sfb_br
       || ctrl.vec
       || ctrl.fence
@@ -400,8 +401,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       || ctrl.rocc
       || uop.uses_fp
     )
-    val is_youngest = uop.uses_brjmp || uop.next_pc.valid || uop.xcpt || uop.csr_en || uop.system_insn
-
+    val is_youngest = (uop.uses_brjmp && !uop.sfb_br) || uop.next_pc.valid || uop.xcpt || uop.csr_en || uop.system_insn
     rrd_stall(i) := (
       (rrd_stall_data(i))                      ||
       (rrd_fence_stall)                        ||
@@ -616,8 +616,9 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val mem_brjmp_mispredict_taken = mem_brjmp_taken && (!mem_brjmp_uop.next_pc.valid || mem_brjmp_wrong_npc)
   val mem_brjmp_mispredict_not_taken = ((mem_brjmp_ctrl.branch && !mem_brjmp_uop.taken) || !mem_brjmp_uop.cfi) && mem_brjmp_uop.next_pc.valid
   val mem_brjmp_mispredict = mem_brjmp_mispredict_taken || mem_brjmp_mispredict_not_taken
+  val mem_brjmp_sfb = mem_uops_reg(0).bits.sfb_br && (if (retireWidth > 1) mem_uops_reg(1).valid else false.B)
 
-  io.imem.btb_update.valid := mem_brjmp_val
+  io.imem.btb_update.valid := mem_brjmp_val && !mem_brjmp_sfb
   io.imem.btb_update.bits.mispredict := mem_brjmp_mispredict
   io.imem.btb_update.bits.isValid := mem_brjmp_val
   io.imem.btb_update.bits.cfiType := (
@@ -637,7 +638,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   }
   io.imem.btb_update.bits.taken := DontCare
 
-  io.imem.bht_update.valid := mem_brjmp_val
+  io.imem.bht_update.valid := mem_brjmp_val && !mem_brjmp_sfb
   io.imem.bht_update.bits.pc := io.imem.btb_update.bits.pc
   io.imem.bht_update.bits.taken := mem_brjmp_taken
   io.imem.bht_update.bits.mispredict := mem_brjmp_mispredict
@@ -652,7 +653,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   io.imem.redirect_ras_head := Mux(mem_brjmp_call, Mux(mem_brjmp_uop.ras_head === (mem_brjmp_uop.nRAS-1).U, 0.U, mem_brjmp_uop.ras_head + 1.U),
     Mux(mem_brjmp_ret, Mux(mem_brjmp_uop.ras_head === 0.U, (mem_brjmp_uop.nRAS-1).U, mem_brjmp_uop.ras_head - 1.U), mem_brjmp_uop.ras_head))
 
-  when (mem_brjmp_val && mem_brjmp_mispredict) {
+  when (mem_brjmp_val && mem_brjmp_mispredict && !mem_brjmp_sfb) {
     flush_rrd_ex := true.B
     io.imem.redirect_val := true.B
     io.imem.redirect_flush := true.B
@@ -729,6 +730,12 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     when (mem_uops_reg(i).valid) {
       wb_uops_reg(i).bits.xcpt := xcpt
       wb_uops_reg(i).bits.xcpt_cause := cause
+    }
+
+    if (i == 1) {
+      when (mem_uops_reg(1).bits.sfb_shadow && mem_brjmp_taken) {
+        wb_uops_reg(1).valid := false.B
+      }
     }
 
     mem_bypasses(i).valid := mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.wxd
