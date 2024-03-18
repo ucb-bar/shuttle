@@ -141,11 +141,10 @@ class ShuttleDTLB(ports: Int, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: TLE
     val mpu_priv = Mux[UInt](do_refill, PRV.S.U, Cat(io.ptw.status.debug, priv))
 
     // PMA
-    val pma = Module(new PMAChecker(edge)(p))
+    val pma = Module(new PMAChecker(edge.manager)(p))
     pma.io.paddr := mpu_physaddr
     // todo: using DataScratchpad doesn't support cacheable.
     val cacheable = pma.io.resp.cacheable
-    val homogeneous = TLBPageLookup(edge.manager.managers, xLen, p(CacheBlockBytes), BigInt(1) << pgIdxBits)(mpu_physaddr).homogeneous
     val deny_access_to_debug = mpu_priv <= PRV.M.U && p(DebugModuleKey).map(dmp => dmp.address.contains(mpu_physaddr)).getOrElse(false.B)
     val prot_r = pma.io.resp.r && !deny_access_to_debug
     val prot_w = pma.io.resp.w && !deny_access_to_debug

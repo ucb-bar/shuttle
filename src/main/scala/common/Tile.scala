@@ -203,6 +203,7 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
   ptwPorts(1) <> outer.frontend.module.io.ptw
 
   val ptw = Module(new PTW(outer.nPTWPorts)(edge, outer.p))
+
   if (outer.usingPTW) {
     dcachePorts(0).req.valid := ptw.io.mem.req.valid
     dcachePorts(0).req.bits.addr := ptw.io.mem.req.bits.addr
