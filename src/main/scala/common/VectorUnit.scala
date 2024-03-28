@@ -38,6 +38,7 @@ class ShuttleVectorCoreIO(implicit p: Parameters) extends CoreBundle()(p) {
   }
 
   val wb = new Bundle {
+    val store_pending = Input(Bool())
     val retire_late = Output(Bool())
     val inst = Output(UInt(32.W))
     val rob_should_wb = Output(Bool()) // debug

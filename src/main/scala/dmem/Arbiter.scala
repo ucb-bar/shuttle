@@ -57,6 +57,7 @@ class ShuttleDCacheArbiter(n: Int)(implicit p: Parameters) extends Module
       val tag_hit = io.mem.resp.bits.tag(log2Up(n)-1,0) === i.U
       resp.valid := io.mem.resp.valid && tag_hit
       io.requestor(i).ordered := io.mem.ordered
+      io.requestor(i).store_pending := io.mem.store_pending
       io.requestor(i).perf := io.mem.perf
       io.requestor(i).s2_nack := io.mem.s2_nack && s2_id === i.U
       io.requestor(i).clock_enabled := io.mem.clock_enabled

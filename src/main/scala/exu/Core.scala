@@ -929,6 +929,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
     io_v.wb.vxrm := csr.io.vector.get.vxrm
     io_v.wb.frm := csr.io.fcsr_rm
+    io_v.wb.store_pending := io.dmem.store_pending
     v.set_vxsat := io_v.set_vxsat
 
     when (io_v.set_vconfig.valid) { v.set_vconfig := io_v.set_vconfig }

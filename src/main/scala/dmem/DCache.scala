@@ -86,6 +86,7 @@ class ShuttleDCacheIO(implicit p: Parameters) extends CoreBundle()(p) {
 
   val resp = Flipped(Valid(new ShuttleDMemResp))
   val ordered = Input(Bool())
+  val store_pending = Input(Bool())
 
   val keep_clock_enabled = Output(Bool()) // should D$ avoid clock-gating itself?
   val clock_enabled = Input(Bool()) // is D$ currently being clocked?
@@ -528,6 +529,7 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
 
 
   io.ordered := mshrs.io.fence_rdy && !s1_valid && !s2_valid && !s1_replay_valid && !s2_replay_valid && !replay_arb.io.out.valid
+  io.store_pending := mshrs.io.store_pending
 
   // performance events
   io.perf := DontCare

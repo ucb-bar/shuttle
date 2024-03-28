@@ -31,6 +31,7 @@ class ShuttleDCacheMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1H
     val probe_rdy = Output(Bool())
     val fence_rdy = Output(Bool())
     val replay_next = Output(Bool())
+    val store_pending = Output(Bool())
   })
 
   // determine if the request is cacheable or not
@@ -67,6 +68,7 @@ class ShuttleDCacheMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1H
 
   io.fence_rdy := true.B
   io.probe_rdy := true.B
+  io.store_pending := sdq_val =/= 0.U
 
   val mshrs = (0 until cfg.nMSHRs) map { i =>
     val mshr = Module(new ShuttleDCacheMSHR(i))
