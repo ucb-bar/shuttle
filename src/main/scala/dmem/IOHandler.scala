@@ -17,6 +17,7 @@ class IOHandler(id: Int)(implicit edge: TLEdgeOut, p: Parameters) extends L1Hell
     val mem_access = Decoupled(new TLBundleA(edge.bundle))
     val mem_ack = Flipped(Valid(new TLBundleD(edge.bundle)))
     val replay_next = Output(Bool())
+    val store_pending = Output(Bool())
   })
 
   def beatOffset(addr: UInt) = addr.extract(beatOffBits - 1, wordOffBits)
@@ -69,6 +70,7 @@ class IOHandler(id: Int)(implicit edge: TLEdgeOut, p: Parameters) extends L1Hell
   io.resp.bits.has_data := isRead(req.cmd)
   io.resp.bits.data := loadgen.data
   io.resp.bits.size := req.size
+  io.store_pending := state =/= s_idle && isWrite(req.cmd)
 
   when (io.req.fire) {
     req := io.req.bits

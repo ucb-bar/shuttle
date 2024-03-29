@@ -68,7 +68,6 @@ class ShuttleDCacheMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1H
 
   io.fence_rdy := true.B
   io.probe_rdy := true.B
-  io.store_pending := sdq_val =/= 0.U
 
   val mshrs = (0 until cfg.nMSHRs) map { i =>
     val mshr = Module(new ShuttleDCacheMSHR(i))
@@ -143,6 +142,8 @@ class ShuttleDCacheMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1H
 
   TLArbiter.lowestFromSeq(edge, io.mem_acquire, mshrs.map(_.io.mem_acquire) ++ mmios.map(_.io.mem_access))
   TLArbiter.lowestFromSeq(edge, io.mem_finish,  mshrs.map(_.io.mem_finish))
+
+  io.store_pending := sdq_val =/= 0.U || mmios.map(_.io.store_pending).orR
 
   io.resp <> resp_arb.io.out
   io.req.ready := Mux(!cacheable,

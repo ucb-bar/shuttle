@@ -236,6 +236,7 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
     ptw.io.mem.replay_next := false.B
     ptw.io.mem.s2_gpa := false.B
     ptw.io.mem.s2_gpa_is_pte := false.B
+    ptw.io.mem.store_pending := false.B
 
     val ptw_s2_addr = Pipe(ptw.io.mem.req.fire, ptw.io.mem.req.bits.addr, 2).bits
     val ptw_s2_legal = edge.manager.findSafe(ptw_s2_addr).reduce(_||_)
