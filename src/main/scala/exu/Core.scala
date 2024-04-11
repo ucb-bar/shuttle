@@ -24,6 +24,8 @@ class ShuttleCustomCSRs(implicit p: Parameters) extends freechips.rocketchip.til
 class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) extends CoreModule()(p)
   with HasFPUParameters
 {
+  val shuttleParams = coreParams.asInstanceOf[ShuttleCoreParams]
+
   val io = IO(new Bundle {
     val hartid = Input(UInt(hartIdLen.W))
     val interrupts = Input(new CoreInterrupts(false))
@@ -173,7 +175,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     l.bits.fp_ctrl := fp_decode(r.bits.inst)
     l.bits.sets_vcfg := Seq(Instructions.VSETVLI, Instructions.VSETIVLI, Instructions.VSETVL).map(_ === r.bits.inst).orR && usingVector.B
     if (usingVector) {
-      val vec_decoder = coreParams.asInstanceOf[ShuttleCoreParams].vector.get.decoder(p)
+      val vec_decoder = shuttleParams.vector.get.decoder(p)
       vec_decoder.io.inst := r.bits.inst
       vec_decoder.io.vconfig := rrd_vcfg.get
       when (vec_decoder.io.legal) {
@@ -290,7 +292,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
   val rrd_stall_data = Wire(Vec(retireWidth, Bool()))
   val rrd_irf_writes = Wire(Vec(retireWidth, Valid(UInt(5.W))))
-  val enableMemALU = coreParams.asInstanceOf[ShuttleCoreParams].enableMemALU && retireWidth > 1
+  val enableMemALU = shuttleParams.enableMemALU && retireWidth > 1
   val rrd_p0_can_forward_x_to_m = rrd_uops(0).bits.ctrl.wxd && rrd_uops(0).bits.uses_alu && enableMemALU.B
   for (i <- 0 until retireWidth) {
     val fp_ctrl = rrd_uops(i).bits.fp_ctrl
@@ -389,6 +391,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       || (uop.sfb_shadow && !uop.rvc)
       || uop.sfb_br
       || ctrl.vec
+      || (shuttleParams.vector.map(_.issueVConfig).getOrElse(false).B && uop.sets_vcfg)
       || ctrl.fence
       || ctrl.amo
       || ctrl.fence_i
@@ -495,7 +498,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     None
   }
 
-  val mulDivParams = tileParams.core.asInstanceOf[ShuttleCoreParams].mulDiv.get
+  val mulDivParams = shuttleParams.mulDiv.get
   require(mulDivParams.mulUnroll == 0)
 
   val mul = Module(new PipelinedMultiplier(64, 2))
@@ -522,7 +525,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
   io.vector.foreach { v =>
     v.status := csr.io.status
-    v.ex.valid := ex_uops_reg(0).valid && ex_uops_reg(0).bits.ctrl.vec && !ex_uops_reg(0).bits.xcpt
+    v.ex.valid := ex_uops_reg(0).valid && (ex_uops_reg(0).bits.ctrl.vec || shuttleParams.vector.get.issueVConfig.B && ex_uops_reg(0).bits.sets_vcfg) && !ex_uops_reg(0).bits.xcpt
     v.ex.vconfig := ex_vcfg.get.bits
     v.ex.vstart := Mux(mem_vcfg.get.valid || wb_vcfg.get.valid, 0.U, csr.io.vector.get.vstart)
     v.ex.fire := !ex_stall && !flush_rrd_ex
@@ -936,7 +939,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     when (io_v.set_vstart.valid) { v.set_vstart := io_v.set_vstart }
   }
 
-  val useDebugROB = coreParams.asInstanceOf[ShuttleCoreParams].debugROB
+  val useDebugROB = shuttleParams.debugROB
   if (useDebugROB) {
     val trace = WireInit(csr.io.trace)
     for (i <- 0 until retireWidth) {

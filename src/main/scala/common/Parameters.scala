@@ -13,7 +13,9 @@ import freechips.rocketchip.devices.tilelink.{BootROMParams, CLINTParams, PLICPa
 case class ShuttleCoreVectorParams(
   build: Parameters => ShuttleVectorUnit,
   vLen: Int,
-  decoder: Parameters => RocketVectorDecoder)
+  decoder: Parameters => RocketVectorDecoder,
+  issueVConfig: Boolean)
+
 
 case class ShuttleCoreParams(
   nL2TLBEntries: Int = 512,
