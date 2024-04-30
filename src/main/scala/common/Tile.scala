@@ -37,7 +37,8 @@ case class ShuttleTileParams(
   btb: Option[BTBParams] = Some(BTBParams()),
   tcm: Option[ShuttleTCMParams] = None,
   tileId: Int = 0,
-  tileBeatBytes: Int = 8) extends InstantiableTileParams[ShuttleTile]
+  tileBeatBytes: Int = 8,
+  boundaryBuffers: Boolean = false) extends InstantiableTileParams[ShuttleTile]
 {
   require(icache.isDefined)
   def instantiate(crossing: HierarchicalElementCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters): ShuttleTile = {
@@ -47,7 +48,6 @@ case class ShuttleTileParams(
   val beuAddr: Option[BigInt] = None
   val blockerCtrlAddr: Option[BigInt] = None
   val dcache = Some(DCacheParams(rowBits=64, nSets=dcacheParams.nSets, nWays=dcacheParams.nWays, nMSHRs=dcacheParams.nMSHRs, nMMIOs=dcacheParams.nMMIOs))
-  val boundaryBuffers: Boolean = false // if synthesized with hierarchical PnR, cut feed-throughs?
   val clockSinkParams: ClockSinkParameters = ClockSinkParameters()
   val baseName = name.getOrElse("shuttle_tile")
   val uniqueName = s"${baseName}_$tileId"
