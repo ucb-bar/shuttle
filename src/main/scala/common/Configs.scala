@@ -116,6 +116,24 @@ class WithL1DCacheIOMSHRs(n: Int) extends Config((site, here, up) => {
   }
 })
 
+class WithL1DCacheBanks(n: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      dcacheParams = tp.tileParams.dcacheParams.copy(nBanks = n)
+    ))
+    case other => other
+  }
+})
+
+class WithL1DCacheTagBanks(n: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      dcacheParams = tp.tileParams.dcacheParams.copy(nTagBanks = n)
+    ))
+    case other => other
+  }
+})
+
 class WithTCM(address: BigInt = 0x70000000L, size: BigInt = 64L << 10, banks: Int = 4) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
@@ -129,6 +147,23 @@ class WithShuttleTileBeatBytes(beatBytes: Int) extends Config((site, here, up) =
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       tileBeatBytes = beatBytes
+    ))
+    case other => other
+  }
+})
+
+class WithAsynchronousShuttleTiles(depth: Int, sync: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: ShuttleTileAttachParams => tp.copy(crossingParams = tp.crossingParams.copy(
+      crossingType = AsynchronousCrossing()))
+    case t => t
+  }
+})
+
+class WithShuttleTileBoundaryBuffers extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      boundaryBuffers = true
     ))
     case other => other
   }
