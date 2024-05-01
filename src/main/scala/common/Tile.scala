@@ -150,7 +150,9 @@ class ShuttleTile private(
         address = AddressSet(base, mask),
         beatBytes = shuttleParams.tileBeatBytes,
         atomics = true,
-        devOverride = Some(device)))
+        devOverride = Some(device),
+        devName = Some(s"Core $tileId TCM bank $b")
+      ))
       tcm.node := TLFragmenter(shuttleParams.tileBeatBytes, p(CacheBlockBytes)) := tlSlaveXbar.node
     }
     val replicationSize = (1 << log2Ceil(p(NumTiles))) * tcmParams.size
