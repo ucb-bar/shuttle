@@ -37,7 +37,7 @@ case class ShuttleTileParams(
   btb: Option[BTBParams] = Some(BTBParams()),
   tcm: Option[ShuttleTCMParams] = None,
   tileId: Int = 0,
-  tileBeatBytes: Int = 8,
+  tileBeatBytes: Int = 16,
   boundaryBuffers: Boolean = false) extends InstantiableTileParams[ShuttleTile]
 {
   require(icache.isDefined)

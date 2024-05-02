@@ -23,7 +23,7 @@ class WithNShuttleCores(
       core = ShuttleCoreParams(retireWidth = retireWidth),
       btb = Some(BTBParams(nEntries=32)),
       icache = Some(
-        ICacheParams(rowBits = -1, nSets=64, nWays=8, fetchBytes=2*4)
+        ICacheParams(rowBits = -1, nSets=64, nWays=1, fetchBytes=2*4)
       ))
     List.tabulate(n) (i => ShuttleTileAttachParams(
       shuttle.copy(tileId = i + idOffset),
