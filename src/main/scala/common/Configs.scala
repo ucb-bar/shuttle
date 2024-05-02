@@ -10,30 +10,46 @@ import freechips.rocketchip.diplomacy.{SynchronousCrossing, AsynchronousCrossing
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.tile._
 
-class WithNShuttleCores(n: Int = 1, retireWidth: Int = 2) extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => {
-    val prev = up(TilesLocated(InSubsystem), site)
+class WithNShuttleCores(
+  n: Int,
+  retireWidth: Int,
+  location: HierarchicalLocation,
+  crossing: ShuttleCrossingParams,
+) extends Config((site, here, up) => {
+  case TilesLocated(`location`) => {
+    val prev = up(TilesLocated(`location`), site)
     val idOffset = up(NumTiles)
-      (0 until n).map { i =>
-        ShuttleTileAttachParams(
-          tileParams = ShuttleTileParams(
-            core = ShuttleCoreParams(retireWidth = retireWidth),
-            btb = Some(BTBParams(nEntries=32)),
-            icache = Some(
-              ICacheParams(rowBits = -1, nSets=64, nWays=8, fetchBytes=2*4)
-            ),
-            tileId = i + idOffset
-          ),
-          crossingParams = ShuttleCrossingParams()
-        )
-      } ++ prev
-    }
+    val shuttle = ShuttleTileParams(
+      core = ShuttleCoreParams(retireWidth = retireWidth),
+      btb = Some(BTBParams(nEntries=32)),
+      icache = Some(
+        ICacheParams(rowBits = -1, nSets=64, nWays=8, fetchBytes=2*4)
+      ))
+    List.tabulate(n) (i => ShuttleTileAttachParams(
+      shuttle.copy(tileId = i + idOffset),
+      crossing
+    )) ++ prev
+  }
   case XLen => 64
   case NumTiles => up(NumTiles) + n
-})
+}) {
+def this(n: Int = 1, retireWidth: Int = 2, location: HierarchicalLocation = InSubsystem) = {
+  this(n, retireWidth, location, ShuttleCrossingParams(
+    master = HierarchicalElementMasterPortParams.locationDefault(location),
+    slave = location match {
+      case InSubsystem => HierarchicalElementSlavePortParams(where=SBUS)
+      case InCluster(clusterId) => HierarchicalElementSlavePortParams(where=CSBUS(clusterId), blockerCtrlWhere=CCBUS(clusterId))
+    },
+    mmioBaseAddressPrefixWhere = location match {
+      case InSubsystem => CBUS
+      case InCluster(clusterId) => CCBUS(clusterId)
+    }
+  ))
+}
+}
 
-class WithShuttleRetireWidth(w: Int) extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+class WithShuttleRetireWidth(w: Int, location: HierarchicalLocation = InSubsystem) extends Config((site, here, up) => {
+  case TilesLocated(`location`) => up(TilesLocated(`location`), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       core = tp.tileParams.core.copy(retireWidth = w)
     ))
@@ -42,8 +58,8 @@ class WithShuttleRetireWidth(w: Int) extends Config((site, here, up) => {
 
 })
 
-class WithShuttleFetchWidth(bytes: Int) extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+class WithShuttleFetchWidth(bytes: Int, location: HierarchicalLocation = InSubsystem) extends Config((site, here, up) => {
+  case TilesLocated(`location`) => up(TilesLocated(`location`), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       core = tp.tileParams.core.copy(fetchWidth = bytes / 2),
       icache = tp.tileParams.icache.map(_.copy(fetchBytes = bytes))
@@ -52,8 +68,8 @@ class WithShuttleFetchWidth(bytes: Int) extends Config((site, here, up) => {
   }
 })
 
-class WithShuttleDebugROB extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+class WithShuttleDebugROB(location: HierarchicalLocation = InSubsystem) extends Config((site, here, up) => {
+  case TilesLocated(`location`) => up(TilesLocated(`location`), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       core = tp.tileParams.core.copy(debugROB = true)
     ))
@@ -62,8 +78,8 @@ class WithShuttleDebugROB extends Config((site, here, up) => {
 
 })
 
-class WithL1ICacheSets(sets: Int) extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+class WithL1ICacheSets(sets: Int, location: HierarchicalLocation = InSubsystem) extends Config((site, here, up) => {
+  case TilesLocated(`location`) => up(TilesLocated(`location`), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       icache = tp.tileParams.icache.map(_.copy(nSets = sets))
     ))
@@ -71,8 +87,8 @@ class WithL1ICacheSets(sets: Int) extends Config((site, here, up) => {
   }
 })
 
-class WithL1DCacheSets(sets: Int) extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+class WithL1DCacheSets(sets: Int, location: HierarchicalLocation = InSubsystem) extends Config((site, here, up) => {
+  case TilesLocated(`location`) => up(TilesLocated(`location`), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       dcacheParams = tp.tileParams.dcacheParams.copy(nSets = sets)
     ))
@@ -80,8 +96,8 @@ class WithL1DCacheSets(sets: Int) extends Config((site, here, up) => {
   }
 })
 
-class WithL1ICacheWays(ways: Int) extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+class WithL1ICacheWays(ways: Int, location: HierarchicalLocation = InSubsystem) extends Config((site, here, up) => {
+  case TilesLocated(`location`) => up(TilesLocated(`location`), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       icache = tp.tileParams.icache.map(_.copy(nWays = ways))
     ))
@@ -89,8 +105,8 @@ class WithL1ICacheWays(ways: Int) extends Config((site, here, up) => {
   }
 })
 
-class WithL1DCacheWays(ways: Int) extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+class WithL1DCacheWays(ways: Int, location: HierarchicalLocation = InSubsystem) extends Config((site, here, up) => {
+  case TilesLocated(`location`) => up(TilesLocated(`location`), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       dcacheParams = tp.tileParams.dcacheParams.copy(nWays = ways)
     ))
@@ -98,8 +114,8 @@ class WithL1DCacheWays(ways: Int) extends Config((site, here, up) => {
   }
 })
 
-class WithL1DCacheMSHRs(n: Int) extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+class WithL1DCacheMSHRs(n: Int, location: HierarchicalLocation = InSubsystem) extends Config((site, here, up) => {
+  case TilesLocated(`location`) => up(TilesLocated(`location`), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       dcacheParams = tp.tileParams.dcacheParams.copy(nMSHRs = n)
     ))
@@ -107,8 +123,8 @@ class WithL1DCacheMSHRs(n: Int) extends Config((site, here, up) => {
   }
 })
 
-class WithL1DCacheIOMSHRs(n: Int) extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+class WithL1DCacheIOMSHRs(n: Int, location: HierarchicalLocation = InSubsystem) extends Config((site, here, up) => {
+  case TilesLocated(`location`) => up(TilesLocated(`location`), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       dcacheParams = tp.tileParams.dcacheParams.copy(nMMIOs = n)
     ))
@@ -116,8 +132,8 @@ class WithL1DCacheIOMSHRs(n: Int) extends Config((site, here, up) => {
   }
 })
 
-class WithL1DCacheBanks(n: Int) extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+class WithL1DCacheBanks(n: Int, location: HierarchicalLocation = InSubsystem) extends Config((site, here, up) => {
+  case TilesLocated(`location`) => up(TilesLocated(`location`), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       dcacheParams = tp.tileParams.dcacheParams.copy(nBanks = n)
     ))
@@ -125,8 +141,8 @@ class WithL1DCacheBanks(n: Int) extends Config((site, here, up) => {
   }
 })
 
-class WithL1DCacheTagBanks(n: Int) extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+class WithL1DCacheTagBanks(n: Int, location: HierarchicalLocation = InSubsystem) extends Config((site, here, up) => {
+  case TilesLocated(`location`) => up(TilesLocated(`location`), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       dcacheParams = tp.tileParams.dcacheParams.copy(nTagBanks = n)
     ))
@@ -134,8 +150,8 @@ class WithL1DCacheTagBanks(n: Int) extends Config((site, here, up) => {
   }
 })
 
-class WithTCM(address: BigInt = 0x70000000L, size: BigInt = 64L << 10, banks: Int = 4) extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+class WithTCM(address: BigInt = 0x70000000L, size: BigInt = 64L << 10, banks: Int = 2, location: HierarchicalLocation = InSubsystem) extends Config((site, here, up) => {
+  case TilesLocated(`location`) => up(TilesLocated(`location`), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       tcm = Some(ShuttleTCMParams(address, size, banks))
     ))
@@ -143,8 +159,8 @@ class WithTCM(address: BigInt = 0x70000000L, size: BigInt = 64L << 10, banks: In
   }
 })
 
-class WithShuttleTileBeatBytes(beatBytes: Int) extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+class WithShuttleTileBeatBytes(beatBytes: Int, location: HierarchicalLocation = InSubsystem) extends Config((site, here, up) => {
+  case TilesLocated(`location`) => up(TilesLocated(`location`), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       tileBeatBytes = beatBytes
     ))
@@ -152,19 +168,38 @@ class WithShuttleTileBeatBytes(beatBytes: Int) extends Config((site, here, up) =
   }
 })
 
-class WithAsynchronousShuttleTiles(depth: Int, sync: Int) extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+class WithAsynchronousShuttleTiles(depth: Int, sync: Int, location: HierarchicalLocation = InSubsystem) extends Config((site, here, up) => {
+  case TilesLocated(`location`) => up(TilesLocated(`location`), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(crossingParams = tp.crossingParams.copy(
       crossingType = AsynchronousCrossing()))
     case t => t
   }
 })
 
-class WithShuttleTileBoundaryBuffers extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+class WithShuttleTileBoundaryBuffers(location: HierarchicalLocation = InSubsystem) extends Config((site, here, up) => {
+  case TilesLocated(`location`) => up(TilesLocated(`location`), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
       boundaryBuffers = true
     ))
     case other => other
   }
+})
+
+class WithShuttleCluster(                                                                                                
+  clusterId: Int,
+  location: HierarchicalLocation = InSubsystem,
+  crossing: ShuttleCrossingParams = ShuttleCrossingParams()
+) extends Config((site, here, up) => {
+  case ClustersLocated(`location`) => up(ClustersLocated(`location`)) :+ ClusterAttachParams(
+    ClusterParams(clusterId = clusterId),
+    crossing) 
+  case TLNetworkTopologyLocated(InCluster(`clusterId`)) => List(
+    ClusterBusTopologyParams(
+      clusterId = clusterId,
+      csbus = site(SystemBusKey),
+      ccbus = site(ControlBusKey).copy(errorDevice = None),
+      coherence = site(ClusterBankedCoherenceKey(clusterId))
+    )
+  ) 
+  case PossibleTileLocations => up(PossibleTileLocations) :+ InCluster(clusterId)
 })
