@@ -138,7 +138,7 @@ class ShuttleTile private(
     := dcache.node)
 
   val vector_unit = shuttleParams.core.vector.map(v => LazyModule(v.build(p)))
-  vector_unit.foreach(vu => tlMasterXbar.node :=* tcmAdjusterNode :=* vu.atlNode)
+  vector_unit.foreach(vu => tlMasterXbar.node :=* TLBuffer() :=* tcmAdjusterNode :=* vu.atlNode)
   vector_unit.foreach(vu => tlOtherMastersNode :=* vu.tlNode)
 
   shuttleParams.tcm.foreach { tcmParams => DisableMonitors { implicit p =>
