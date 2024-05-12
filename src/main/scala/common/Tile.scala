@@ -123,6 +123,7 @@ class ShuttleTile private(
 
   val frontend = LazyModule(new ShuttleFrontend(tileParams.icache.get, tileId))
   (tlMasterXbar.node
+    := TLBuffer()
     := tcmAdjusterNode
     := TLBuffer()
     := TLWidthWidget(tileParams.icache.get.fetchBytes)
@@ -132,6 +133,7 @@ class ShuttleTile private(
   val nPTWPorts = 2 + roccs.map(_.nPTWPorts).sum
   val dcache = LazyModule(new ShuttleDCache(tileId, ShuttleDCacheParams())(p))
   (tlMasterXbar.node
+    := TLBuffer()
     := tcmAdjusterNode
     := TLBuffer()
     := TLWidthWidget(tileParams.dcache.get.rowBits/8)
@@ -153,7 +155,7 @@ class ShuttleTile private(
         devOverride = Some(device),
         devName = Some(s"Core $tileId TCM bank $b")
       ))
-      tcm.node := TLFragmenter(shuttleParams.tileBeatBytes, p(CacheBlockBytes)) := tlSlaveXbar.node
+      tcm.node := TLFragmenter(shuttleParams.tileBeatBytes, p(CacheBlockBytes)) := TLBuffer() := tlSlaveXbar.node
     }
     val replicationSize = (1 << log2Ceil(p(NumTiles))) * tcmParams.size
     val tcm_master_replicator = LazyModule(new RegionReplicator(ReplicatedRegion(
