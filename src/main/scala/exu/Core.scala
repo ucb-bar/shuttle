@@ -178,8 +178,8 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       val vec_decoder = shuttleParams.vector.get.decoder(p)
       vec_decoder.io.inst := r.bits.inst
       vec_decoder.io.vconfig := rrd_vcfg.get
-      when (vec_decoder.io.legal && !rrd_vcfg.get.vtype.vill) {
-        l.bits.ctrl.legal := true.B
+      when (vec_decoder.io.legal) {
+        l.bits.ctrl.legal := !rrd_vcfg.get.vtype.vill
         l.bits.ctrl.fp := vec_decoder.io.fp
         l.bits.ctrl.rocc := false.B
         l.bits.ctrl.branch := false.B
