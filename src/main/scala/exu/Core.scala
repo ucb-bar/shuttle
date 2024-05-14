@@ -178,7 +178,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       val vec_decoder = shuttleParams.vector.get.decoder(p)
       vec_decoder.io.inst := r.bits.inst
       vec_decoder.io.vconfig := rrd_vcfg.get
-      when (vec_decoder.io.legal) {
+      when (vec_decoder.io.legal && !rrd_vcfg.get.vtype.vill) {
         l.bits.ctrl.legal := true.B
         l.bits.ctrl.fp := vec_decoder.io.fp
         l.bits.ctrl.rocc := false.B
@@ -481,7 +481,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val ex_new_vl = if (usingVector) {
     val ex_avl = Mux(ex_setvcfg_uop.ctrl.rxs1,
       Mux(ex_setvcfg_uop.inst(19,15) === 0.U,
-        Mux(ex_setvcfg_uop.inst(11,6) === 0.U, ex_vcfg.get.bits.vl, ~(0.U((1+log2Ceil(maxVLMax)).W))),
+        Mux(ex_setvcfg_uop.inst(11,6) === 0.U, ex_vcfg.get.bits.vl, ex_vcfg.get.bits.vtype.vlMax),
         ex_setvcfg_uop.rs1_data,
       ),
       ex_setvcfg_uop.inst(19,15))
