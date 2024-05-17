@@ -57,6 +57,7 @@ class ShuttleFPPipe(implicit p: Parameters) extends FPUModule()(p) with ShouldBe
     req.typ := inst(21,20)
     req.fmt := inst(26,25)
     req.fmaCmd := inst(3,2) | (!ctrl.ren3 && inst(27))
+    req.vec := false.B
     req
   }
 
