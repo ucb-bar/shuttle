@@ -16,7 +16,10 @@ class AddressOffsetter(mask: BigInt, offset: BigInt)(implicit p: Parameters) ext
     def contains(x: UInt) = ((x ^ io.base).zext & (~mask).S) === 0.S
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       out.a <> in.a
-      out.a.bits.address := in.a.bits.address + Mux(contains(in.a.bits.address), offset.U, 0.U)
+      val adjusted = in.a.bits.address | offset.U
+      when (edgeOut.manager.containsSafe(adjusted) && contains(in.a.bits.address)) {
+        out.a.bits.address := adjusted
+      }
 
       in.b <> out.b
       when (out.b.valid) { assert(!contains(out.b.bits.address)) }

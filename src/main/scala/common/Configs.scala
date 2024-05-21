@@ -158,6 +158,15 @@ class WithTCM(address: BigInt = 0x70000000L, size: BigInt = 64L << 10, banks: In
   }
 })
 
+class WithSGTCM(address: BigInt = 0x78000000L, size: BigInt = 8L << 10, banks: Int = 32, location: HierarchicalLocation = InSubsystem) extends Config((site, here, up) => {
+  case TilesLocated(`location`) => up(TilesLocated(location), site) map {
+    case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      sgtcm = Some(ShuttleSGTCMParams(address, size, banks))
+    ))
+    case other => other
+  }
+})
+
 class WithShuttleTileBeatBytes(beatBytes: Int, location: HierarchicalLocation = InSubsystem) extends Config((site, here, up) => {
   case TilesLocated(`location`) => up(TilesLocated(location), site) map {
     case tp: ShuttleTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
