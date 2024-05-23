@@ -17,6 +17,8 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.prci._
 
+import shuttle.dmem.{ShuttleSGTCMParams, SGTCM}
+
 trait TCMParams {
   def base: BigInt
   def size: BigInt
@@ -28,10 +30,6 @@ case class ShuttleTCMParams(
   size: BigInt,
   banks: Int) extends TCMParams
 
-case class ShuttleSGTCMParams(
-  base: BigInt,
-  size: BigInt,
-  banks: Int) extends TCMParams
 
 import shuttle.ifu._
 import shuttle.exu._
@@ -199,10 +197,9 @@ class ShuttleTile private(
     val device = new MemoryDevice
     val base = sgtcmParams.base
     val mask = sgtcmParams.size - 1
-    val sgtcm = LazyModule(new TLRAM(
+    val sgtcm = LazyModule(new SGTCM(
       address = AddressSet(base, mask),
       beatBytes = sgtcmParams.banks,
-      atomics = true,
       devOverride = Some(device),
       devName = Some(s"Core $tileId SGTCM")
     ))

@@ -9,6 +9,7 @@ import freechips.rocketchip.devices.tilelink.{BootROMParams}
 import freechips.rocketchip.diplomacy.{SynchronousCrossing, AsynchronousCrossing, RationalCrossing}
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.tile._
+import shuttle.dmem.{ShuttleSGTCMParams}
 
 class WithNShuttleCores(n: Int, retireWidth: Int,
   location: HierarchicalLocation,
