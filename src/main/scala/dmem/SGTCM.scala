@@ -9,10 +9,7 @@ import org.chipsalliance.diplomacy.lazymodule._
 
 import freechips.rocketchip.diplomacy.{AddressSet, Device, DeviceRegName, DiplomaticSRAM, RegionType, TransferSizes, HasJustOneSeqMem}
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util.{ECCParams}
-
-import freechips.rocketchip.util.DataToAugmentedData
-import freechips.rocketchip.util.BooleanToAugmentedBoolean
+import freechips.rocketchip.util._
 
 import shuttle.common.{TCMParams}
 
@@ -23,13 +20,13 @@ case class ShuttleSGTCMParams(
   banks: Int) extends TCMParams
 
 class SGTCM(
-    address: AddressSet,
-    beatBytes: Int = 4,
-    val devName: Option[String] = None,
-    val devOverride: Option[Device with DeviceRegName] = None
-  )(implicit p: Parameters) extends DiplomaticSRAM(address, beatBytes, devName, None, devOverride)
-{
+  address: AddressSet,
+  beatBytes: Int = 4,
+  val devName: Option[String] = None,
+  val devOverride: Option[Device with DeviceRegName] = None
+)(implicit p: Parameters) extends DiplomaticSRAM(address, beatBytes, devName, None, devOverride) {
   require (beatBytes >= 1 && isPow2(beatBytes))
+  require (address.contiguous)
 
   val node = TLManagerNode(Seq(TLSlavePortParameters.v1(
     Seq(TLSlaveParameters.v1(
@@ -46,23 +43,45 @@ class SGTCM(
     beatBytes  = beatBytes,
     minLatency = 1))) // no bypass needed for this device
 
+  val sgnode = TLManagerNode(Seq.tabulate(beatBytes) { i => TLSlavePortParameters.v1(
+    Seq(TLSlaveParameters.v1(
+      address            = List(AddressSet(address.base + i, address.mask - (beatBytes - 1))),
+      resources          = resources,
+      regionType         = RegionType.IDEMPOTENT,
+      executable         = false,
+      supportsGet        = TransferSizes(1, 1),
+      supportsPutPartial = TransferSizes(1, 1),
+      supportsPutFull    = TransferSizes(1, 1),
+      supportsArithmetic = TransferSizes.none,
+      supportsLogical    = TransferSizes.none,
+      fifoId             = Some(0)).v2copy(name=devName)), // requests are handled in order
+    beatBytes = 1,
+    minLatency = 1)
+  })
+
   private val outer = this
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
+
     val (in, edge) = node.in(0)
+    val (sgin, sgedge) = sgnode.in.unzip
 
     val indexBits = (outer.address.mask & ~(beatBytes-1)).bitCount
-    val mem = SyncReadMem(
+    val mem = Seq.fill(beatBytes) { SyncReadMem(
       BigInt(1) << indexBits,
-      Vec(beatBytes, UInt(8.W)))
+      UInt(8.W))
+    }
 
     // R stage registers from A
     val r_full      = RegInit(false.B)
+    val r_sg_full   = RegInit(VecInit.fill(beatBytes)(false.B))
     val r_size      = Reg(UInt(edge.bundle.sizeBits.W))
     val r_source    = Reg(UInt(edge.bundle.sourceBits.W))
+    val r_sg_source = Reg(Vec(beatBytes, UInt(sgedge.map(_.bundle.sourceBits).max.W)))
     val r_read      = Reg(Bool())
-    val r_raw_data  = Wire(Vec(beatBytes, Bits(8.W)))
+    val r_sg_read   = Reg(Vec(beatBytes, Bool()))
+    val r_raw_data  = Wire(Vec(beatBytes, UInt(8.W)))
 
     in.d.bits.opcode  := Mux(r_read, TLMessages.AccessAckData, TLMessages.AccessAck)
     in.d.bits.param   := 0.U
@@ -73,44 +92,59 @@ class SGTCM(
     in.d.bits.data    := r_raw_data.asUInt
     in.d.bits.corrupt := false.B
 
-    // Pipeline control
-
     in.d.valid := r_full
-    val r_ready = in.d.ready
-    in.a.ready := (!r_full || r_ready)
+    in.a.ready := (!r_full || in.d.ready) && (!r_sg_full.orR || sgin.map(_.d.ready).andR)
+    when (in.d.ready) { r_full := false.B }
 
-    // ignore sublane if it is a read or mask is all set
-    val a_read = in.a.bits.opcode === TLMessages.Get
-    val a_sublane = false.B
 
-    // Forward pipeline stage from A to R
-    when (r_ready) { r_full := false.B }
+    for (i <- 0 until beatBytes) {
+      sgin(i).d.bits.opcode := Mux(r_sg_read(i), TLMessages.AccessAckData, TLMessages.AccessAck)
+      sgin(i).d.bits.param  := 0.U
+      sgin(i).d.bits.size   := 0.U
+      sgin(i).d.bits.source := r_sg_source(i)
+      sgin(i).d.bits.sink   := 0.U
+      sgin(i).d.bits.denied := false.B
+      sgin(i).d.bits.data   := r_raw_data(i)
+      sgin(i).d.bits.corrupt := false.B
+
+      sgin(i).d.valid       := r_sg_full(i)
+      sgin(i).a.ready := !in.a.valid && (!r_full || in.d.ready) && (!r_sg_full(i) || sgin(i).d.ready)
+      when (sgin(i).d.ready) { r_sg_full(i) := false.B }
+    }
+
     when (in.a.fire) {
       r_full     := true.B
       r_size     := in.a.bits.size
       r_source   := in.a.bits.source
-      r_read     := a_read
+      r_read     := in.a.bits.opcode === TLMessages.Get
+    }
+    for (i <- 0 until beatBytes) {
+      when (sgin(i).a.fire) {
+        r_sg_full(i)   := true.B
+        r_sg_source(i) := sgin(i).a.bits.source
+        r_sg_read(i)   := sgin(i).a.bits.opcode === TLMessages.Get
+      }
     }
 
-    // Split data into eccBytes-sized chunks:
-    val a_data = VecInit(Seq.tabulate(beatBytes) { i => in.a.bits.data(8*(i+1)-1, 8*i) })
-
     // SRAM arbitration
-    val a_fire = in.a.fire
-    val a_ren = a_read
-    val wen = a_fire && !a_ren
-    val ren = !wen && a_fire // help Chisel infer a RW-port
+    for (i <- 0 until beatBytes) {
+      val read = Mux(in.a.valid, in.a.bits.opcode, sgin(i).a.bits.opcode) === TLMessages.Get
+      val index = Mux(in.a.valid, in.a.bits.address, sgin(i).a.bits.address) >> log2Ceil(beatBytes)
+      val data = Mux(in.a.valid, in.a.bits.data(8*(i+1)-1, 8*i), sgin(i).a.bits.data)
 
-    val addr   = in.a.bits.address
-    val sel    = in.a.bits.mask
+      val wen = ((in.a.fire && in.a.bits.mask(i)) || sgin(i).a.fire) && !read
+      val ren = !wen && (in.a.fire || sgin(i).a.fire)
 
-    val index = Cat(mask.zip((addr >> log2Ceil(beatBytes)).asBools).filter(_._1).map(_._2).reverse)
-    r_raw_data := mem.read(index, ren) holdUnless RegNext(ren)
-    when (wen) { mem.write(index, a_data, sel.asBools) }
+      r_raw_data(i) := mem(i).read(index, ren) holdUnless RegNext(ren)
+      when (wen) { mem(i).write(index, data) }
+    }
 
     // Tie off unused channels
     in.b.valid := false.B
     in.c.ready := true.B
     in.e.ready := true.B
+    sgin.foreach(_.b.valid := false.B)
+    sgin.foreach(_.c.ready := true.B)
+    sgin.foreach(_.e.ready := true.B)
   }
 }

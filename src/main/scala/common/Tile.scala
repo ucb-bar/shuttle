@@ -193,6 +193,7 @@ class ShuttleTile private(
     }
   }}
 
+  val sgtcmXbar = LazyModule(new TLXbar())
   shuttleParams.sgtcm.foreach { sgtcmParams => DisableMonitors { implicit p =>
     val device = new MemoryDevice
     val base = sgtcmParams.base
@@ -204,6 +205,8 @@ class ShuttleTile private(
       devName = Some(s"Core $tileId SGTCM")
     ))
     sgtcm.node := TLWidthWidget(shuttleParams.tileBeatBytes) := tlSlaveXbar.node
+    sgtcm.sgnode :*= sgtcmXbar.node
+    vector_unit.foreach { vu => sgtcmXbar.node :=* vu.sgNode.get }
   }}
 
   if (shuttleParams.tcm.isDefined || shuttleParams.sgtcm.isDefined) {
@@ -249,6 +252,10 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
   val core = Module(new ShuttleCore(outer, outer.dcache.module.edge)(outer.p))
   outer.vector_unit.foreach { v =>
     core.io.vector.get <> v.module.io
+    val sgtcmParams = outer.shuttleParams.sgtcm
+    v.module.io_sg_base := sgtcmParams.map { sgtcm =>
+      sgtcm.base.U + outer.hartIdSinkNode.bundle * sgtcm.size.U
+    }.getOrElse(0.U)
   }
 
   val dcachePorts = Wire(Vec(2, new ShuttleDCacheIO))

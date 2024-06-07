@@ -9,18 +9,22 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tile._
 import shuttle.dmem._
 
-abstract class ShuttleVectorUnit(implicit p: Parameters) extends LazyModule {
+abstract class ShuttleVectorUnit(implicit p: Parameters) extends LazyModule with HasNonDiplomaticTileParameters {
   val module: ShuttleVectorUnitModuleImp
   val tlNode: TLNode = TLIdentityNode()
   val atlNode: TLNode = TLIdentityNode()
+  val sgNode: Option[TLNode] = tileParams.asInstanceOf[ShuttleTileParams].sgtcm.map { _ => TLIdentityNode() }
 }
 
-class ShuttleVectorUnitModuleImp(outer: ShuttleVectorUnit) extends LazyModuleImp(outer) {
+class ShuttleVectorUnitModuleImp(outer: ShuttleVectorUnit) extends LazyModuleImp(outer) with HasCoreParameters {
   val io = IO(new ShuttleVectorCoreIO)
+  val io_sg_base = IO(Input(UInt(coreMaxAddrBits.W)))
+  val sgSize = outer.tileParams.asInstanceOf[ShuttleTileParams].sgtcm.map(_.size)
 }
 
 class ShuttleVectorCoreIO(implicit p: Parameters) extends CoreBundle()(p) {
   val status = Input(new MStatus)
+  val satp = Input(new PTBR)
   val ex = new Bundle {
     val valid = Input(Bool())
     val uop = Input(new ShuttleUOP)

@@ -526,6 +526,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
   io.vector.foreach { v =>
     v.status := csr.io.status
+    v.satp := csr.io.ptbr
     v.ex.valid := ex_uops_reg(0).valid && (ex_uops_reg(0).bits.ctrl.vec || shuttleParams.vector.get.issueVConfig.B && ex_uops_reg(0).bits.sets_vcfg) && !ex_uops_reg(0).bits.xcpt
     v.ex.vconfig := ex_vcfg.get.bits
     v.ex.vstart := Mux(mem_vcfg.get.valid || wb_vcfg.get.valid, 0.U, csr.io.vector.get.vstart)
