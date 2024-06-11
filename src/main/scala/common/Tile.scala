@@ -274,13 +274,21 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
     val (respArb, cmdRouter) = {
       val respArb = Module(new RRArbiter(new RoCCResponse()(outer.p), outer.roccs.size))
       val cmdRouter = Module(new RoccCommandRouter(outer.roccs.map(_.opcodes))(outer.p))
+      var ptwPortId = 2
       outer.roccs.zipWithIndex.foreach { case (rocc, i) =>
-        ptwPorts(i+2) <> rocc.module.io.ptw
+        //ptwPorts(i+2) <> rocc.module.io.ptw
+        for (j <- 0 until rocc.nPTWPorts) {
+          ptwPorts(ptwPortId) <> rocc.module.io.ptw(j)
+          ptwPortId += 1
+        }
         rocc.module.io.cmd <> cmdRouter.io.out(i)
         rocc.module.io.mem := DontCare
         rocc.module.io.mem.req.ready := false.B
         assert(!rocc.module.io.mem.req.valid)
         respArb.io.in(i) <> Queue(rocc.module.io.resp)
+        rocc.module.io.fpu_req.ready := false.B
+        rocc.module.io.fpu_resp.valid := false.B
+        rocc.module.io.fpu_resp.bits := DontCare
       }
       val nFPUPorts = outer.roccs.count(_.usesFPU)
       if (nFPUPorts > 0) {
