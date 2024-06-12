@@ -25,6 +25,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   with HasFPUParameters
 {
   val shuttleParams = coreParams.asInstanceOf[ShuttleCoreParams]
+  val nTotalRoCCCSRs = tile.roccCSRs.flatten.size
 
   val io = IO(new Bundle {
     val hartid = Input(UInt(hartIdLen.W))
@@ -33,7 +34,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     val dmem = new ShuttleDCacheIO
     val ptw = Flipped(new DatapathPTWIO())
     val ptw_tlb = new TLBPTWIO
-    val rocc = Flipped(new RoCCCoreIO())
+    val rocc = Flipped(new RoCCCoreIO(nTotalRoCCCSRs))
     val trace = Output(new TraceBundle)
     val fcsr_rm = Output(UInt(FPConstants.RM_SZ.W))
     val vector = if (usingVector) Some(Flipped(new ShuttleVectorCoreIO)) else None
