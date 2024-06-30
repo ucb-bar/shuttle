@@ -31,7 +31,6 @@ class WithNShuttleCores(n: Int = 1, retireWidth: Int = 2) extends Config((site, 
         )
       } ++ prev
     }
-  case XLen => 64
   case NumTiles => up(NumTiles) + n
 })
 
