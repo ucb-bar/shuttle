@@ -157,9 +157,9 @@ class ShuttleTile private(
 
   val frontend = LazyModule(new ShuttleFrontend(tileParams.icache.get, tileId))
   (tlMasterXbar.node
+    := TLBuffer()
     := tcmAdjusterNode(shuttleParams.tcm)
     := tcmAdjusterNode(shuttleParams.sgtcm)
-    := TLBuffer()
     := TLWidthWidget(tileParams.icache.get.fetchBytes)
     := frontend.masterNode)
   frontend.resetVectorSinkNode := resetVectorNexusNode
@@ -167,14 +167,19 @@ class ShuttleTile private(
   val nPTWPorts = 2 + roccs.map(_.nPTWPorts).sum
   val dcache = LazyModule(new ShuttleDCache(tileId, ShuttleDCacheParams())(p))
   (tlMasterXbar.node
+    := TLBuffer()
     := tcmAdjusterNode(shuttleParams.tcm)
     := tcmAdjusterNode(shuttleParams.sgtcm)
-    := TLBuffer()
     := TLWidthWidget(tileParams.dcache.get.rowBits/8)
     := dcache.node)
 
   val vector_unit = shuttleParams.core.vector.map(v => LazyModule(v.build(p)))
-  vector_unit.foreach { vu => tlMasterXbar.node :=* tcmAdjusterNode(shuttleParams.tcm) :=* tcmAdjusterNode(shuttleParams.sgtcm) :=* vu.atlNode }
+  vector_unit.foreach { vu => (tlMasterXbar.node
+    :=* TLBuffer()
+    :=* tcmAdjusterNode(shuttleParams.tcm)
+    :=* tcmAdjusterNode(shuttleParams.sgtcm)
+    :=* vu.atlNode)
+  }
   vector_unit.foreach(vu => tlOtherMastersNode :=* vu.tlNode)
 
   shuttleParams.tcm.foreach { tcmParams => DisableMonitors { implicit p =>
@@ -189,7 +194,7 @@ class ShuttleTile private(
         devOverride = Some(device),
         devName = Some(s"Core $tileId TCM bank $b")
       ))
-      tcm.node := TLFragmenter(shuttleParams.tileBeatBytes, p(CacheBlockBytes)) := tlSlaveXbar.node
+      tcm.node := TLFragmenter(shuttleParams.tileBeatBytes, p(CacheBlockBytes)) := TLBuffer() := tlSlaveXbar.node
     }
   }}
 

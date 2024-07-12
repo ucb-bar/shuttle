@@ -11,7 +11,9 @@ import freechips.rocketchip.rocket._
 import freechips.rocketchip.tile._
 import shuttle.dmem.{ShuttleSGTCMParams}
 
-class WithNShuttleCores(n: Int, retireWidth: Int,
+class WithNShuttleCores(
+  n: Int,
+  retireWidth: Int,
   location: HierarchicalLocation,
   crossing: ShuttleCrossingParams,
 ) extends Config((site, here, up) => {
