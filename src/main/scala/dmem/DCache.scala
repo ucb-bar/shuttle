@@ -17,8 +17,8 @@ case class ShuttleDCacheParams(
   nWays: Int = 4,
   nMSHRs: Int = 4,
   nMMIOs: Int = 1,
-  nBanks: Int = 4,
-  nTagBanks: Int = 4,
+  nBanks: Int = 1,
+  nTagBanks: Int = 1,
   singlePorted: Boolean = true,
   replayQueueSize: Int = 6,
   nWbs: Int = 2

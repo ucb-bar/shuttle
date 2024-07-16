@@ -195,3 +195,22 @@ class WithShuttleTileBoundaryBuffers(location: HierarchicalLocation = InSubsyste
     case other => other
   }
 })
+
+class WithShuttleCluster(                                                                                                
+  clusterId: Int,
+  location: HierarchicalLocation = InSubsystem,
+  crossing: ShuttleCrossingParams = ShuttleCrossingParams()
+) extends Config((site, here, up) => {
+  case ClustersLocated(`location`) => up(ClustersLocated(`location`)) :+ ClusterAttachParams(
+    ClusterParams(clusterId = clusterId),
+    crossing) 
+  case TLNetworkTopologyLocated(InCluster(`clusterId`)) => List(
+    ClusterBusTopologyParams(
+      clusterId = clusterId,
+      csbus = site(SystemBusKey),
+      ccbus = site(ControlBusKey).copy(errorDevice = None),
+      coherence = site(ClusterBankedCoherenceKey(clusterId))
+    )
+  ) 
+  case PossibleTileLocations => up(PossibleTileLocations) :+ InCluster(clusterId)
+})
