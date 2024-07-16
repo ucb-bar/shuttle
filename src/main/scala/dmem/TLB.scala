@@ -105,12 +105,12 @@ class ShuttleDTLB(ports: Int, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: TLE
 
   // SFENCE processing logic.
   when (sfence) {
-    assert(!io.sfence.bits.rs1 || (io.sfence.bits.addr >> pgIdxBits) === (io.req(0).bits.vaddr >> pgIdxBits))
+    assert(!io.sfence.bits.rs1 || (io.sfence.bits.addr >> pgIdxBits) === (io.req.last.bits.vaddr >> pgIdxBits))
     def all_real_entries = sectored_entries.flatten ++ superpage_entries
     for (e <- all_real_entries) {
       val hv = false.B
       val hg = false.B
-      when (!hg && io.sfence.bits.rs1) { e.invalidateVPN(io.req(0).bits.vaddr(vaddrBits-1,pgIdxBits), hv) }
+      when (!hg && io.sfence.bits.rs1) { e.invalidateVPN(io.req.last.bits.vaddr(vaddrBits-1,pgIdxBits), hv) }
         .elsewhen (!hg && io.sfence.bits.rs2) { e.invalidateNonGlobal(hv) }
         .otherwise { e.invalidate(hv || hg) }
     }
@@ -263,10 +263,10 @@ class ShuttleDTLB(ports: Int, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: TLE
       val signed = true
       val nPgLevelChoices = pgLevels - minPgLevels + 1
       val minVAddrBits = pgIdxBits + minPgLevels * pgLevelBits + extraBits
-        (for (i <- 0 until nPgLevelChoices) yield {
-          val mask = ((BigInt(1) << vaddrBitsExtended) - (BigInt(1) << (minVAddrBits + i * pgLevelBits - signed.toInt))).U
+        (for (j <- 0 until nPgLevelChoices) yield {
+          val mask = ((BigInt(1) << vaddrBitsExtended) - (BigInt(1) << (minVAddrBits + j * pgLevelBits - signed.toInt))).U
           val maskedVAddr = io.req(i).bits.vaddr & mask
-          additionalPgLevels === i.U && !(maskedVAddr === 0.U || signed.B && maskedVAddr === mask)
+          additionalPgLevels === j.U && !(maskedVAddr === 0.U || signed.B && maskedVAddr === mask)
         }).orR
     }
     val bad_va =

@@ -180,7 +180,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       vec_decoder.io.inst := r.bits.inst
       vec_decoder.io.vconfig := rrd_vcfg.get
       when (vec_decoder.io.legal) {
-        l.bits.ctrl.legal := true.B
+        l.bits.ctrl.legal := !rrd_vcfg.get.vtype.vill
         l.bits.ctrl.fp := vec_decoder.io.fp
         l.bits.ctrl.rocc := false.B
         l.bits.ctrl.branch := false.B
@@ -480,15 +480,16 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val ex_setvcfg_valid = ex_uops_reg.map(r => r.valid && r.bits.sets_vcfg)
   val ex_setvcfg_uop = Mux1H(ex_setvcfg_valid, ex_uops_reg).bits
   val ex_new_vl = if (usingVector) {
-    val ex_avl = Mux(ex_setvcfg_uop.ctrl.rxs1,
-      Mux(ex_setvcfg_uop.inst(19,15) === 0.U,
-        Mux(ex_setvcfg_uop.inst(11,6) === 0.U, ex_vcfg.get.bits.vl, ~(0.U((1+log2Ceil(maxVLMax)).W))),
-        ex_setvcfg_uop.rs1_data,
-      ),
-      ex_setvcfg_uop.inst(19,15))
     val ex_new_vtype = VType.fromUInt(MuxCase(ex_setvcfg_uop.rs2_data, Seq(
       ex_setvcfg_uop.inst(31,30).andR -> ex_setvcfg_uop.inst(29,20),
       !ex_setvcfg_uop.inst(31)        -> ex_setvcfg_uop.inst(30,20))))
+    val ex_avl = Mux(ex_setvcfg_uop.ctrl.rxs1,
+      Mux(ex_setvcfg_uop.inst(19,15) === 0.U,
+        Mux(ex_setvcfg_uop.inst(11,6) === 0.U, ex_vcfg.get.bits.vl, ex_new_vtype.vlMax),
+        ex_setvcfg_uop.rs1_data,
+      ),
+      ex_setvcfg_uop.inst(19,15))
+
     val ex_new_vl = ex_new_vtype.vl(ex_avl, ex_vcfg.get.bits.vl, false.B, false.B, false.B)
     when (ex_setvcfg_valid.orR) {
       ex_vcfg_out.get.bits.vtype := ex_new_vtype
@@ -526,6 +527,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
   io.vector.foreach { v =>
     v.status := csr.io.status
+    v.satp := csr.io.ptbr
     v.ex.valid := ex_uops_reg(0).valid && (ex_uops_reg(0).bits.ctrl.vec || shuttleParams.vector.get.issueVConfig.B && ex_uops_reg(0).bits.sets_vcfg) && !ex_uops_reg(0).bits.xcpt
     v.ex.vconfig := ex_vcfg.get.bits
     v.ex.vstart := Mux(mem_vcfg.get.valid || wb_vcfg.get.valid, 0.U, csr.io.vector.get.vstart)
