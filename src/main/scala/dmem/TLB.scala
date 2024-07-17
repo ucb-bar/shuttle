@@ -105,7 +105,7 @@ class ShuttleDTLB(ports: Int, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: TLE
 
   // SFENCE processing logic.
   when (sfence) {
-    assert(!io.sfence.bits.rs1 || (io.sfence.bits.addr >> pgIdxBits) === (io.req.last.bits.vaddr >> pgIdxBits))
+    assert(!io.sfence.bits.rs1 || io.sfence.bits.addr(vaddrBits-1, pgIdxBits) === io.req.last.bits.vaddr(vaddrBits-1, pgIdxBits))
     def all_real_entries = sectored_entries.flatten ++ superpage_entries
     for (e <- all_real_entries) {
       val hv = false.B

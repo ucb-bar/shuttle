@@ -719,7 +719,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       if (i == 0)
         wb_uops_reg(i).bits.fdivin := fp_pipe.io.s1_fpiu_fdiv
     }
-    when (mem_uops_reg(i).valid && ctrl.mem && (!dtlb.io.req.last.ready || dtlb.io.resp.last.miss)) {
+    when (mem_uops_reg(i).valid && ctrl.mem && !dtlb.io.sfence.valid && (!dtlb.io.req.last.ready || dtlb.io.resp.last.miss)) {
       wb_uops_reg(i).bits.needs_replay := true.B
     }
 

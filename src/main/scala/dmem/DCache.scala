@@ -135,20 +135,20 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   val replay_empty_q = Module(new Queue(new ShuttleDMemResp, replayQueueSize*2))
 
   io.req.ready := true.B
-  val s1_valid = RegNext(io.req.fire(), init=false.B)
+  val s1_valid = RegNext(io.req.fire, init=false.B)
   val s1_req = RegEnable(io.req.bits, io.req.valid)
   val s1_bank_mask = UIntToOH(bankIdx(s1_req.addr))
   val s1_valid_masked = s1_valid && !io.s1_kill
   val s1_sfence = s1_req.cmd === M_SFENCE
-  val s1_replay_valid = RegNext(mshrs.io.replay.fire(), init=false.B)
-  val s1_replay_req = RegEnable(mshrs.io.replay.bits, mshrs.io.replay.fire())
-  val s1_replay_way_en = RegEnable(mshrs.io.replay_way, mshrs.io.replay.fire())
+  val s1_replay_valid = RegNext(mshrs.io.replay.fire, init=false.B)
+  val s1_replay_req = RegEnable(mshrs.io.replay.bits, mshrs.io.replay.fire)
+  val s1_replay_way_en = RegEnable(mshrs.io.replay_way, mshrs.io.replay.fire)
   val s1_replay_bank_mask = UIntToOH(bankIdx(s1_replay_req.addr))
-  val s1_probe_valid = RegNext(prober.io.meta_read.fire(), init=false.B)
-  val s1_probe_addr = RegEnable(Cat(prober.io.meta_read.bits.tag, prober.io.meta_read.bits.idx) << blockOffBits, prober.io.meta_read.fire())
+  val s1_probe_valid = RegNext(prober.io.meta_read.fire, init=false.B)
+  val s1_probe_addr = RegEnable(Cat(prober.io.meta_read.bits.tag, prober.io.meta_read.bits.idx) << blockOffBits, prober.io.meta_read.fire)
   val s1_probe_bank_mask = Reg(Vec(nBanks, Bool()))
-  val s1_wb_valid = RegNext(wb.io.data_req.fire(), init=false.B)
-  val s1_wb_addr = RegEnable((Cat(wb.io.meta_read.bits.tag, wb.io.meta_read.bits.idx) << blockOffBits) | wb.io.data_req.bits.addr, wb.io.data_req.fire())
+  val s1_wb_valid = RegNext(wb.io.data_req.fire, init=false.B)
+  val s1_wb_addr = RegEnable((Cat(wb.io.meta_read.bits.tag, wb.io.meta_read.bits.idx) << blockOffBits) | wb.io.data_req.bits.addr, wb.io.data_req.fire)
   val s1_wb_bank_mask = UIntToOH(bankIdx(s1_wb_addr))
 
   val s2_valid = RegNext(s1_valid_masked && !s1_sfence, init=false.B)
@@ -318,11 +318,11 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   val s2_replaced_way_en = RegEnable(s1_replaced_way_en, s1_valid)
   val s2_repl_meta = Mux1H(s2_replaced_way_en, wayMap((w: Int) => RegEnable(s1_meta_resp(w), s1_valid && s1_replaced_way_en(w))).toSeq)
 
-  when (mshrs.io.req.fire() || s2_tag_match) {
+  when (mshrs.io.req.fire || s2_tag_match) {
     replacers(s2_idx) := replPolicy.get_next_state(replacers(s2_idx),
-      Mux(mshrs.io.req.fire(), RegNext(s1_replaced_way), OHToUInt(s2_tag_match_way)))
+      Mux(mshrs.io.req.fire, RegNext(s1_replaced_way), OHToUInt(s2_tag_match_way)))
   }
-  when (mshrs.io.req.fire()) { replPolicy.miss }
+  when (mshrs.io.req.fire) { replPolicy.miss }
 
   // miss handling
   mshrs.io.req.valid := s2_valid_masked && !s2_hit && (isPrefetch(s2_req.cmd) || isRead(s2_req.cmd) || isWrite(s2_req.cmd))
@@ -331,7 +331,7 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   mshrs.io.req.bits.tag_match := s2_tag_match
   mshrs.io.req.bits.old_meta := Mux(s2_tag_match, L1Metadata(s2_repl_meta.tag, s2_hit_state), s2_repl_meta)
   mshrs.io.req.bits.way_en := Mux(s2_tag_match, s2_tag_match_way, s2_replaced_way_en)
-  when (ShiftRegister(prober.io.meta_read.fire(), 2)) {
+  when (ShiftRegister(prober.io.meta_read.fire, 2)) {
     mshrs.io.req.bits.addr := ShiftRegister(Cat(prober.io.meta_read.bits.tag, prober.io.meta_read.bits.idx) << blockOffBits, 2)
   }
   mshrs.io.req_data := s2_req.data
@@ -357,7 +357,7 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   when (replay_data_q.io.count > (replay_data_q.entries - 3).U || replay_empty_q.io.count > (replay_empty_q.entries - 3).U) {
     block_replay := true.B
   }
-  when (isWrite(mshrs.io.replay.bits.cmd) && io.req.fire() && isWrite(io.req.bits.cmd)) {
+  when (isWrite(mshrs.io.replay.bits.cmd) && io.req.fire && isWrite(io.req.bits.cmd)) {
     block_replay := true.B
     force_stall := true.B
   }
@@ -376,7 +376,7 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
 
   // refills
   val grant_has_data = edge.hasData(tl_out.d.bits)
-  mshrs.io.mem_grant.valid := tl_out.d.fire()
+  mshrs.io.mem_grant.valid := tl_out.d.fire
   mshrs.io.mem_grant.bits := tl_out.d.bits
   tl_out.d.ready := true.B
   writeArbs.zipWithIndex.foreach { t => when (!t._1.io.in(1).ready && bankIdx(mshrs.io.refill.addr) === t._2.U && grant_has_data) { tl_out.d.ready := false.B } }
@@ -398,7 +398,7 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   val wbArb = Module(new Arbiter(new WritebackReq(edge.bundle), 2))
   wbArb.io.in(0) <> prober.io.wb_req
   val prober_wb = RegInit(0.U(nWbs.W))
-  when (prober.io.wb_req.fire()) {
+  when (prober.io.wb_req.fire) {
     prober_wb := UIntToOH(wbArb.io.chosen)
   }
   when (prober_wb =/= 0.U) {
@@ -476,7 +476,7 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   when (s2_nack_hit) { mshrs.io.req.valid := false.B }
   val s2_nack_victim = s2_hit && mshrs.io.secondary_miss
   val s2_nack_miss = !s2_hit && !mshrs.io.req.ready
-  val s2_nack_probe = !s2_hit && ShiftRegister(prober.io.meta_read.fire(), 2)
+  val s2_nack_probe = !s2_hit && ShiftRegister(prober.io.meta_read.fire, 2)
   val s2_nack = s2_nack_hit || s2_nack_victim || s2_nack_miss || s2_nack_probe
   s2_valid_masked := s2_valid && !s2_nack && !io.s2_kill
 

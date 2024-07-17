@@ -30,7 +30,8 @@ case class ShuttleCoreParams(
 {
   require(Seq(4, 8, 16, 32).contains(fetchWidth))
   override def minFLen: Int = 16
-
+  val xLen = 64
+  val pgLevels = 3
   val useBitManip: Boolean = false
   val useBitManipCrypto: Boolean = false
   val useCryptoNIST: Boolean = false
