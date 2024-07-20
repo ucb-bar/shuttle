@@ -16,6 +16,7 @@ class ShuttleDCacheMSHR(id: Int)(implicit edge: TLEdgeOut, p: Parameters) extend
     val req_sec_val    = Input(Bool())
     val req_sec_rdy    = Output(Bool())
     val req_bits       = Input(new ShuttleMSHRReq())
+    val probe_addr     = Input(UInt(paddrBits.W))
 
     val idx_match       = Output(Bool())
     val tag             = Output(Bits(tagBits.W))
@@ -39,6 +40,7 @@ class ShuttleDCacheMSHR(id: Int)(implicit edge: TLEdgeOut, p: Parameters) extend
   val req_tag = req.addr >> untagBits
   val req_block_addr = (req.addr >> blockOffBits) << blockOffBits
   val idx_match = req_idx === io.req_bits.addr(untagBits-1,blockOffBits)
+  val probe_idx_match = req_idx === io.probe_addr(untagBits-1,blockOffBits)
 
   val new_coh = RegInit(ClientMetadata.onReset)
   val (_, shrink_param, coh_on_clear)    = req.old_meta.coh.onCacheControl(M_FLUSH)
@@ -132,14 +134,14 @@ class ShuttleDCacheMSHR(id: Int)(implicit edge: TLEdgeOut, p: Parameters) extend
   io.idx_match := (state =/= s_invalid) && idx_match
   io.refill.way_en := req.way_en
   io.refill.addr := req_block_addr | refill_address_inc
-  io.tag := req_tag 
+  io.tag := req_tag
   io.req_pri_rdy := state === s_invalid
   io.req_sec_rdy := sec_rdy && rpq.io.enq.ready
 
   val meta_hazard = RegInit(0.U(2.W))
   when (meta_hazard =/= 0.U) { meta_hazard := meta_hazard + 1.U }
   when (io.meta_write.fire) { meta_hazard := 1.U }
-  io.probe_rdy := !idx_match || (!state.isOneOf(states_before_refill) && meta_hazard === 0.U)
+  io.probe_rdy := !(state =/= s_invalid && probe_idx_match) || (!state.isOneOf(states_before_refill) && meta_hazard === 0.U)
 
   io.meta_write.valid := state.isOneOf(s_meta_write_req, s_meta_clear)
   io.meta_write.bits.idx := req_idx

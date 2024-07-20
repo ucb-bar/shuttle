@@ -15,6 +15,7 @@ class ShuttleDCacheMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1H
     val req = Flipped(Decoupled(new ShuttleMSHRReq))
     val req_data = Input(UInt(coreDataBits.W))
     val req_mask = Input(UInt(coreDataBytes.W))
+    val probe_addr = Input(UInt(paddrBits.W))
     val resp = Decoupled(new ShuttleDMemResp)
     val secondary_miss = Output(Bool())
 
@@ -82,6 +83,7 @@ class ShuttleDCacheMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1H
     mshr.io.req_sec_val := io.req.valid && sdq_rdy && addr_match(i)
     mshr.io.req_bits := io.req.bits
     mshr.io.req_bits.sdq_id := sdq_alloc_id
+    mshr.io.probe_addr := io.probe_addr
 
     meta_write_arb.io.in(i) <> mshr.io.meta_write
     wb_req_arb.io.in(i) <> mshr.io.wb_req

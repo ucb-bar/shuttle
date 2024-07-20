@@ -331,9 +331,7 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   mshrs.io.req.bits.tag_match := s2_tag_match
   mshrs.io.req.bits.old_meta := Mux(s2_tag_match, L1Metadata(s2_repl_meta.tag, s2_hit_state), s2_repl_meta)
   mshrs.io.req.bits.way_en := Mux(s2_tag_match, s2_tag_match_way, s2_replaced_way_en)
-  when (ShiftRegister(prober.io.meta_read.fire, 2)) {
-    mshrs.io.req.bits.addr := ShiftRegister(Cat(prober.io.meta_read.bits.tag, prober.io.meta_read.bits.idx) << blockOffBits, 2)
-  }
+  mshrs.io.probe_addr := Cat(prober.io.meta_read.bits.tag, prober.io.meta_read.bits.idx) << blockOffBits
   mshrs.io.req_data := s2_req.data
   mshrs.io.req_mask := s2_req.mask
   tl_out.a <> mshrs.io.mem_acquire
