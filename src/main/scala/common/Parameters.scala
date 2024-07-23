@@ -13,6 +13,8 @@ import freechips.rocketchip.devices.tilelink.{BootROMParams, CLINTParams, PLICPa
 case class ShuttleCoreVectorParams(
   build: Parameters => ShuttleVectorUnit,
   vLen: Int,
+  vfLen: Int,
+  vfh: Boolean,
   decoder: Parameters => RocketVectorDecoder,
   issueVConfig: Boolean)
 
@@ -72,5 +74,8 @@ case class ShuttleCoreParams(
   val useConditionalZero = false
   override val useVector = vector.isDefined
   override def vLen = vector.map(_.vLen).getOrElse(0)
+  override def eLen = 64
+  override def vfLen = vector.map(_.vfLen).getOrElse(0)
+  override def vfh = vector.map(_.vfh).getOrElse(false)
   val traceHasWdata: Boolean = debugROB
 }
