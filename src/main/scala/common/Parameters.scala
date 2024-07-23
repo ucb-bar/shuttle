@@ -10,6 +10,13 @@ import freechips.rocketchip.subsystem.{MemoryPortParams}
 import org.chipsalliance.cde.config.{Parameters, Field}
 import freechips.rocketchip.devices.tilelink.{BootROMParams, CLINTParams, PLICParams}
 
+case class ShuttleCoreVectorParams(
+  build: Parameters => ShuttleVectorUnit,
+  vLen: Int,
+  decoder: Parameters => RocketVectorDecoder,
+  issueVConfig: Boolean)
+
+
 case class ShuttleCoreParams(
   nL2TLBEntries: Int = 512,
   nL2TLBWays: Int = 1,
@@ -17,7 +24,8 @@ case class ShuttleCoreParams(
   enableMemALU: Boolean = true,
   retireWidth: Int = 2,
   fetchWidth: Int = 4,
-  debugROB: Boolean = false
+  debugROB: Boolean = false,
+  vector: Option[ShuttleCoreVectorParams] = None
 ) extends CoreParams
 {
   require(Seq(4, 8, 16, 32).contains(fetchWidth))
@@ -62,5 +70,7 @@ case class ShuttleCoreParams(
   val nPTECacheEntries: Int = 0
   val useHypervisor: Boolean = false
   val useConditionalZero = false
+  override val useVector = vector.isDefined
+  override def vLen = vector.map(_.vLen).getOrElse(0)
   val traceHasWdata: Boolean = debugROB
 }

@@ -18,7 +18,11 @@ class ShuttleUOP(implicit p: Parameters) extends CoreBundle {
   val fp_ctrl = new FPUCtrlSigs
   val rvc = Bool()
 
+  val sets_vcfg = Bool()
+
   val btb_resp = Valid(new BTBResp)
+  val sfb_br = Bool()
+  val sfb_shadow = Bool()
   val next_pc = Valid(UInt(vaddrBitsExtended.W))
   val ras_head = UInt(log2Ceil(nRAS).W)
   val taken = Bool()
@@ -69,6 +73,6 @@ class ShuttleUOP(implicit p: Parameters) extends CoreBundle {
   def cfi = ctrl.branch || ctrl.jal || ctrl.jalr
 
   def uses_brjmp = cfi || sfence
-  def uses_alu = ctrl.wxd && !ctrl.mem && !ctrl.div && !ctrl.mul && !csr_en && !ctrl.fp && !ctrl.rocc && !ctrl.jalr
+  def uses_alu = ctrl.wxd && !ctrl.mem && !ctrl.div && !ctrl.mul && !csr_en && !ctrl.fp && !ctrl.rocc && !ctrl.jalr && !ctrl.vec
   def uses_fp = ctrl.fp && !(fp_ctrl.ldst && fp_ctrl.wen)
 }
