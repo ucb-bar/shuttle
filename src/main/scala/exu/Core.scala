@@ -1055,6 +1055,9 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     csr_fcsr_flags(0) := wb_uops_reg(0).bits.fexc
   }
 
+  when (io.vector.map(_.set_fflags.valid).getOrElse(false.B)) {
+    csr.io.fcsr_flags.valid := true.B
+  }
   csr_fcsr_flags(3) := io.vector.map(v => Mux(v.set_fflags.valid, v.set_fflags.bits, 0.U)).getOrElse(0.U)
 
   io.imem.sfence.valid := false.B
