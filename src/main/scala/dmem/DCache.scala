@@ -11,6 +11,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.rocket._
+import barf.{CanInstantiatePrefetcher, MultiNextLinePrefetcherParams}
 
 case class ShuttleDCacheParams(
   nSets: Int = 64,
@@ -21,7 +22,8 @@ case class ShuttleDCacheParams(
   nTagBanks: Int = 4,
   singlePorted: Boolean = true,
   replayQueueSize: Int = 6,
-  nWbs: Int = 2
+  nWbs: Int = 2,
+  prefetcher: CanInstantiatePrefetcher = MultiNextLinePrefetcherParams()
 ) {
   require(replayQueueSize >= 3)
 }
@@ -133,12 +135,25 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   val mshrs = Module(new ShuttleDCacheMSHRFile)
   val replay_data_q = Module(new Queue(new ShuttleDMemResp, replayQueueSize))
   val replay_empty_q = Module(new Queue(new ShuttleDMemResp, replayQueueSize*2))
+  val prefetcher = outer.params.prefetcher.instantiate()
+  val req_arb = Module(new Arbiter(new ShuttleDMemReq, 2))
+  req_arb.io.in(0) <> io.req
+  assert(!io.req.valid || !isPrefetch(io.req.bits.cmd))
+  val valid_prefetch = edge.manager.supportsAcquireBFast(
+    prefetcher.io.request.bits.address,
+    blockOffBits.U)
 
-  io.req.ready := true.B
-  val s1_valid = RegNext(io.req.fire, init=false.B)
-  val s1_req = RegEnable(io.req.bits, io.req.valid)
+  req_arb.io.in(1).valid := prefetcher.io.request.valid && valid_prefetch
+  req_arb.io.in(1).bits := DontCare
+  req_arb.io.in(1).bits.addr := prefetcher.io.request.bits.address
+  req_arb.io.in(1).bits.cmd := Mux(prefetcher.io.request.bits.write, M_PFW, M_PFR)
+  prefetcher.io.request.ready := req_arb.io.in(1).ready && valid_prefetch
+
+  req_arb.io.out.ready := true.B
+  val s1_valid = RegNext(req_arb.io.out.fire, init=false.B)
+  val s1_req = RegEnable(req_arb.io.out.bits, req_arb.io.out.valid)
   val s1_bank_mask = UIntToOH(bankIdx(s1_req.addr))
-  val s1_valid_masked = s1_valid && !io.s1_kill
+  val s1_valid_masked = s1_valid && (!io.s1_kill || isPrefetch(s1_req.cmd))
   val s1_sfence = s1_req.cmd === M_SFENCE
   val s1_replay_valid = RegNext(mshrs.io.replay.fire, init=false.B)
   val s1_replay_req = RegEnable(mshrs.io.replay.bits, mshrs.io.replay.fire)
@@ -179,7 +194,7 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   // check for unsupported operations
   assert(!s1_valid || !s1_req.cmd.isOneOf(M_PWR))
 
-  val s1_addr = io.s1_paddr
+  val s1_addr = Mux(isPrefetch(s1_req.cmd), s1_req.addr, io.s1_paddr)
   val s1_replay_addr = s1_replay_req.addr
 
   when (s1_valid && s1_write) {
@@ -208,32 +223,32 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   val wdata_encoded = writeArbs.map { a => (0 until rowWords).map(i => a.io.out.bits.data(coreDataBits*(i+1)-1,coreDataBits*i)) }
   (datas zip wdata_encoded).map { t => t._1.io.write.bits.data := t._2.asUInt }
 
-  val cpu_bank_mask = UIntToOH(bankIdx(io.req.bits.addr))
+  val cpu_bank_mask = UIntToOH(bankIdx(req_arb.io.out.bits.addr))
   val stall_ctr = RegInit(0.U(2.W))
   val force_stall = WireInit(false.B)
   val stall_cpu = stall_ctr === ~(0.U(2.W)) || io.s2_nack
-  when (io.req.valid && force_stall) {
+  when (req_arb.io.out.valid && force_stall) {
     stall_ctr := stall_ctr + 1.U
   }.otherwise {
     stall_ctr := 0.U
   }
   // tag read for new requests
-  meta.io.read(1).valid := io.req.valid && !stall_cpu
-  meta.io.read(1).bits.idx := io.req.bits.addr >> blockOffBits
+  meta.io.read(1).valid := req_arb.io.out.valid && !stall_cpu
+  meta.io.read(1).bits.idx := req_arb.io.out.bits.addr >> blockOffBits
   meta.io.read(1).bits.tag := DontCare
   meta.io.read(1).bits.way_en := DontCare
-  when (!meta.io.read(1).ready) { io.req.ready := false.B }
+  when (!meta.io.read(1).ready) { req_arb.io.out.ready := false.B }
 
   // data read for new requests
-  val cpu_skips_read = isPrefetch(io.req.bits.cmd) || (
-    isWrite(io.req.bits.cmd) && !isRead(io.req.bits.cmd) &&
-      ~(new StoreGen(io.req.bits.size, io.req.bits.addr, 0.U, xLen/8).mask) === 0.U
+  val cpu_skips_read = isPrefetch(req_arb.io.out.bits.cmd) || (
+    isWrite(req_arb.io.out.bits.cmd) && !isRead(req_arb.io.out.bits.cmd) &&
+      ~(new StoreGen(req_arb.io.out.bits.size, req_arb.io.out.bits.addr, 0.U, xLen/8).mask) === 0.U
   )
-  readArbs.zipWithIndex.map { t => t._1.io.in(0).valid := io.req.valid && cpu_bank_mask(t._2) && !stall_cpu && !cpu_skips_read }
-  readArbs.foreach { _.io.in(0).bits.addr := io.req.bits.addr }
+  readArbs.zipWithIndex.map { t => t._1.io.in(0).valid := req_arb.io.out.valid && cpu_bank_mask(t._2) && !stall_cpu && !cpu_skips_read }
+  readArbs.foreach { _.io.in(0).bits.addr := req_arb.io.out.bits.addr }
   readArbs.foreach { _.io.in(0).bits.way_en := ~(0.U(nWays.W)) }
-  readArbs.zipWithIndex.map { t => when (!t._1.io.in(0).ready && cpu_bank_mask(t._2) && !cpu_skips_read) { io.req.ready := false.B } }
-  when (stall_cpu) { io.req.ready := false.B }
+  readArbs.zipWithIndex.map { t => when (!t._1.io.in(0).ready && cpu_bank_mask(t._2) && !cpu_skips_read) { req_arb.io.out.ready := false.B } }
+  when (stall_cpu) { req_arb.io.out.ready := false.B }
 
   // tag check and way muxing
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
@@ -355,7 +370,7 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   when (replay_data_q.io.count > (replay_data_q.entries - 3).U || replay_empty_q.io.count > (replay_empty_q.entries - 3).U) {
     block_replay := true.B
   }
-  when (isWrite(mshrs.io.replay.bits.cmd) && io.req.fire && isWrite(io.req.bits.cmd)) {
+  when (isWrite(mshrs.io.replay.bits.cmd) && req_arb.io.out.fire && isWrite(req_arb.io.out.bits.cmd)) {
     block_replay := true.B
     force_stall := true.B
   }
@@ -476,10 +491,10 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   val s2_nack_miss = !s2_hit && !mshrs.io.req.ready
   val s2_nack_probe = !s2_hit && ShiftRegister(prober.io.meta_read.fire, 2)
   val s2_nack = s2_nack_hit || s2_nack_victim || s2_nack_miss || s2_nack_probe
-  s2_valid_masked := s2_valid && !s2_nack && !io.s2_kill
+  s2_valid_masked := s2_valid && !s2_nack && (!io.s2_kill || isPrefetch(s2_req.cmd))
 
   val cache_resp = Wire(Valid(new ShuttleDMemResp))
-  cache_resp.valid := s2_valid_masked && s2_hit
+  cache_resp.valid := s2_valid_masked && s2_hit && !isPrefetch(s2_req.cmd)
   cache_resp.bits.tag := s2_req.tag
   cache_resp.bits.size := s2_req.size
   cache_resp.bits.has_data := isRead(s2_req.cmd)
@@ -512,7 +527,7 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
   uncache_resp.valid := mshrs.io.resp.valid
   mshrs.io.resp.ready := RegNext(!s1_valid && !s1_replay_valid)
 
-  io.s2_nack := s2_valid && s2_nack
+  io.s2_nack := s2_valid && s2_nack && !isPrefetch(s2_req.cmd)
   io.resp := Mux(mshrs.io.resp.ready, uncache_resp, cache_resp)
 
   val replay_arb = Module(new Arbiter(new ShuttleDMemResp, 2))
@@ -525,6 +540,9 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
     io.resp.bits := replay_arb.io.out.bits
   }
 
+  prefetcher.io.snoop.valid := s2_valid_masked && !isPrefetch(s2_req.cmd)
+  prefetcher.io.snoop.bits.address := s2_req.addr
+  prefetcher.io.snoop.bits.write := isWrite(s2_req.cmd)
 
   io.ordered := mshrs.io.fence_rdy && !s1_valid && !s2_valid && !s1_replay_valid && !s2_replay_valid && !replay_arb.io.out.valid
   io.store_pending := mshrs.io.store_pending
