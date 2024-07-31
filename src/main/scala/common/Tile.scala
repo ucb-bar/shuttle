@@ -67,7 +67,8 @@ case class ShuttleCrossingParams(
   slave: HierarchicalElementSlavePortParams = HierarchicalElementSlavePortParams(where=SBUS),
   mmioBaseAddressPrefixWhere: TLBusWrapperLocation = SBUS,
   resetCrossingType: ResetCrossingType = NoResetCrossing(),
-  forceSeparateClockReset: Boolean = false
+  forceSeparateClockReset: Boolean = false,
+  forceMergedCreditedTLCrossings: Boolean = false
 ) extends HierarchicalElementCrossingParamsLike
 
 case class ShuttleTileAttachParams(
