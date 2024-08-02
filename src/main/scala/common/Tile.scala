@@ -248,6 +248,14 @@ class ShuttleTile private(
 
 
   override lazy val module = new ShuttleTileModuleImp(this)
+
+  override def makeMasterBoundaryBuffers(crossing: ClockCrossingType)(implicit p: Parameters) = TLBuffer(
+    if (shuttleParams.boundaryBuffers) BufferParams.default else BufferParams.none
+  )
+
+  override def makeSlaveBoundaryBuffers(crossing: ClockCrossingType)(implicit p: Parameters) = TLBuffer(
+    if (shuttleParams.boundaryBuffers) BufferParams.default else BufferParams.none
+  )
 }
 
 class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
