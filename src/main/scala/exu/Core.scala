@@ -798,7 +798,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     when (RegNext(mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.mem && kill_mem)) {
       io.dmem.s2_kill := true.B
     }
-    when (wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.mem && (wb_uops(i).bits.needs_replay || wb_uops_reg(i).bits.xcpt)) {
+    when (wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.mem && (wb_uops(i).bits.needs_replay || wb_uops_reg(i).bits.xcpt || kill_wb(i))) {
       io.dmem.s2_kill := true.B
     }
   }
