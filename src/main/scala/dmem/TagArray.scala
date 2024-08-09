@@ -72,7 +72,7 @@ class L1MetadataArrayBank[T <: L1Metadata](onReset: () => T, nSets: Int)(implici
     }
   }
   val s1_read_idx = RegEnable(io.read.bits.idx, io.read.valid)
-  when (RegNext(io.read.fire() && !forward_from_rbuf) && !(io.write.valid && io.write.bits.idx === s1_read_idx)) {
+  when (RegNext(io.read.fire && !forward_from_rbuf) && !(io.write.valid && io.write.bits.idx === s1_read_idx)) {
     rbuf_valid := true.B
     rbuf_idx := s1_read_idx
     rbuf := io.resp

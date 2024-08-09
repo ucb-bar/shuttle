@@ -34,7 +34,6 @@ class WithNShuttleCores(
         )
       } ++ prev
     }
-  case XLen => 64
   case NumTiles => up(NumTiles) + n
 }) {
   def this(n: Int = 1, retireWidth: Int = 2, location: HierarchicalLocation = InSubsystem) = this(n, retireWidth, location, ShuttleCrossingParams(

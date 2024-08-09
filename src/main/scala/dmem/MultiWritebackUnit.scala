@@ -25,7 +25,7 @@ class MultiWritebackUnit(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extend
   io.req.ready := Mux1H(tail, wbs.map(_.io.req.ready))
   wbs.foreach(_.io.req.bits := io.req.bits)
   for (i <- 0 until n) { wbs(i).io.req.valid := io.req.valid && tail(i) }
-  when (io.req.fire()) { tail := tail << 1 | tail(n-1) }
+  when (io.req.fire) { tail := tail << 1 | tail(n-1) }
 
   io.data_req.valid := Mux1H(head, wbs.map(_.io.data_req.valid))
   io.data_req.bits := Mux1H(head, wbs.map(_.io.data_req.bits))

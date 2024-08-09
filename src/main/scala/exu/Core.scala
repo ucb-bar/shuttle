@@ -719,7 +719,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       if (i == 0)
         wb_uops_reg(i).bits.fdivin := fp_pipe.io.s1_fpiu_fdiv
     }
-    when (mem_uops_reg(i).valid && ctrl.mem && (!dtlb.io.req.last.ready || dtlb.io.resp.last.miss)) {
+    when (mem_uops_reg(i).valid && ctrl.mem && !dtlb.io.sfence.valid && (!dtlb.io.req.last.ready || dtlb.io.resp.last.miss)) {
       wb_uops_reg(i).bits.needs_replay := true.B
     }
 
@@ -798,7 +798,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     when (RegNext(mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.mem && kill_mem)) {
       io.dmem.s2_kill := true.B
     }
-    when (wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.mem && (wb_uops(i).bits.needs_replay || wb_uops_reg(i).bits.xcpt)) {
+    when (wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.mem && (wb_uops(i).bits.needs_replay || wb_uops_reg(i).bits.xcpt || kill_wb(i))) {
       io.dmem.s2_kill := true.B
     }
   }
@@ -1055,6 +1055,9 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     csr_fcsr_flags(0) := wb_uops_reg(0).bits.fexc
   }
 
+  when (io.vector.map(_.set_fflags.valid).getOrElse(false.B)) {
+    csr.io.fcsr_flags.valid := true.B
+  }
   csr_fcsr_flags(3) := io.vector.map(v => Mux(v.set_fflags.valid, v.set_fflags.bits, 0.U)).getOrElse(0.U)
 
   io.imem.sfence.valid := false.B

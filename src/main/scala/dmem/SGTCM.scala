@@ -7,7 +7,8 @@ import org.chipsalliance.cde.config._
 import org.chipsalliance.diplomacy.bundlebridge._
 import org.chipsalliance.diplomacy.lazymodule._
 
-import freechips.rocketchip.diplomacy.{AddressSet, Device, DeviceRegName, DiplomaticSRAM, RegionType, TransferSizes, HasJustOneSeqMem}
+import freechips.rocketchip.diplomacy.{AddressSet, RegionType, TransferSizes}
+import freechips.rocketchip.diplomacy.{Device, DeviceRegName, DiplomaticSRAM, HasJustOneSeqMem}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 

@@ -16,8 +16,11 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.util._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.prci._
-
 import shuttle.dmem.{ShuttleSGTCMParams, SGTCM}
+import shuttle.ifu._
+import shuttle.exu._
+import shuttle.dmem._
+
 
 trait TCMParams {
   def base: BigInt
@@ -29,11 +32,6 @@ case class ShuttleTCMParams(
   base: BigInt,
   size: BigInt,
   banks: Int) extends TCMParams
-
-
-import shuttle.ifu._
-import shuttle.exu._
-import shuttle.dmem._
 
 case class ShuttleTileParams(
   core: ShuttleCoreParams = ShuttleCoreParams(),
