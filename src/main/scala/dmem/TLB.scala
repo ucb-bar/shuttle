@@ -351,7 +351,7 @@ class ShuttleDTLB(ports: Int, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: TLE
       r_superpage_hit.valid := superpage_hits.orR
       r_superpage_hit.bits := OHToUInt(superpage_hits)
     }
-    when (multipleHits || reset.asBool) {
+    when ((io.req(i).valid && multipleHits) || reset.asBool) {
       all_real_entries.foreach(_.invalidate())
     }
   }
