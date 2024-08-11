@@ -16,7 +16,8 @@ case class ShuttleCoreVectorParams(
   vfLen: Int,
   vfh: Boolean,
   decoder: Parameters => RocketVectorDecoder,
-  issueVConfig: Boolean)
+  issueVConfig: Boolean,
+  vExts: Seq[String])
 
 
 case class ShuttleCoreParams(
@@ -77,5 +78,6 @@ case class ShuttleCoreParams(
   override def eLen = 64
   override def vfLen = vector.map(_.vfLen).getOrElse(0)
   override def vfh = vector.map(_.vfh).getOrElse(false)
+  override def vExts = vector.map(_.vExts).getOrElse(Nil)
   val traceHasWdata: Boolean = debugROB
 }
