@@ -35,10 +35,6 @@ case class ShuttleCoreParams(
   override def minFLen: Int = 16
   val xLen = 64
   val pgLevels = 3
-  val useBitManip: Boolean = false
-  val useBitManipCrypto: Boolean = false
-  val useCryptoNIST: Boolean = false
-  val useCryptoSM: Boolean = false
   val bootFreqHz: BigInt = 0
   val decodeWidth: Int = fetchWidth
   val fpu: Option[freechips.rocketchip.tile.FPUParams] = Some(FPUParams(minFLen = 16,
@@ -73,6 +69,9 @@ case class ShuttleCoreParams(
   val nPTECacheEntries: Int = 0
   val useHypervisor: Boolean = false
   val useConditionalZero = false
+  val useZba = false
+  val useZbb = false
+  val useZbs = false
   override val useVector = vector.isDefined
   override def vLen = vector.map(_.vLen).getOrElse(0)
   override def eLen = 64
