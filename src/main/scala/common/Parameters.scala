@@ -69,9 +69,9 @@ case class ShuttleCoreParams(
   val nPTECacheEntries: Int = 0
   val useHypervisor: Boolean = false
   val useConditionalZero = false
-  val useZba = false
-  val useZbb = false
-  val useZbs = false
+  val useZba = true
+  val useZbb = true
+  val useZbs = true
   override val useVector = vector.isDefined
   override def vLen = vector.map(_.vLen).getOrElse(0)
   override def eLen = 64

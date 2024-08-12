@@ -8,6 +8,7 @@ import freechips.rocketchip.tilelink.TLEdgeOut
 import freechips.rocketchip.util._
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.rocket.Instructions._
+import freechips.rocketchip.rocket.ALU._
 
 import shuttle.common._
 import shuttle.ifu._
@@ -39,8 +40,6 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     val fcsr_rm = Output(UInt(FPConstants.RM_SZ.W))
     val vector = if (usingVector) Some(Flipped(new ShuttleVectorCoreIO)) else None
   })
-
-  val aluFn = new ALUFN
 
   val debug_tsc_reg = RegInit(0.U(64.W))
   debug_tsc_reg := debug_tsc_reg + 1.U
@@ -162,7 +161,8 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       (usingDebug.option(new DebugDecode)) ++:
       (usingVector.option(new VCFGDecode)) ++:
       (usingNMI.option(new NMIDecode)) ++:
-        Seq(new FenceIDecode(false)) ++:
+      Seq(new FenceIDecode(false)) ++:
+      Seq(new ZbaDecode, new Zba64Decode, new ZbbDecode, new Zbb64Decode, new ZbsDecode) ++:
       Seq(new IDecode)
     } flatMap(_.table)
 
@@ -250,7 +250,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     rrd_uops(i).bits.xcpt_cause := cause
 
     when (xcpt) {
-      rrd_uops(i).bits.ctrl.alu_fn := aluFn.FN_ADD
+      rrd_uops(i).bits.ctrl.alu_fn := FN_ADD
       rrd_uops(i).bits.ctrl.alu_dw := DW_XPR
       rrd_uops(i).bits.ctrl.sel_alu1 := A1_RS1
       rrd_uops(i).bits.ctrl.sel_alu2 := A2_ZERO
@@ -555,12 +555,16 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     val sel_alu2 = WireInit(ctrl.sel_alu2)
     val ex_op1 = MuxLookup(sel_alu1, 0.S)(Seq(
       A1_RS1 -> uop.rs1_data.asSInt,
-      A1_PC -> uop.pc.asSInt
+      A1_PC -> uop.pc.asSInt,
+      A1_RS1SHL -> (Mux(uop.inst(3), uop.rs1_data(31,0), uop.rs1_data) << uop.inst(14,13)).asSInt
     ))
+    val ex_op2_oh = UIntToOH(Mux(ctrl.sel_alu2(0), (uop.inst >> 20).asUInt, uop.rs2_data)(log2Ceil(xLen)-1,0)).asSInt
     val ex_op2 = MuxLookup(sel_alu2, 0.S)(Seq(
       A2_RS2 -> uop.rs2_data.asSInt,
       A2_IMM -> imm,
-      A2_SIZE -> Mux(uop.rvc, 2.S, 4.S)
+      A2_SIZE -> Mux(uop.rvc, 2.S, 4.S),
+      A2_RS2OH -> ex_op2_oh,
+      A2_IMMOH -> ex_op2_oh
     ))
 
     alu.io.dw := ctrl.alu_dw
@@ -771,12 +775,16 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
         uop.rs2_data)
       val ex_op1 = MuxLookup(sel_alu1, 0.S)(Seq(
         A1_RS1 -> rs1_data.asSInt,
-        A1_PC -> uop.pc.asSInt
+        A1_PC -> uop.pc.asSInt,
+        A1_RS1SHL -> (Mux(uop.inst(3), rs1_data(31,0), rs1_data) << uop.inst(14,13)).asSInt
       ))
+      val ex_op2_oh = UIntToOH(Mux(ctrl.sel_alu2(0), (uop.inst >> 20).asUInt, rs2_data)(log2Ceil(xLen)-1,0)).asSInt
       val ex_op2 = MuxLookup(sel_alu2, 0.S)(Seq(
         A2_RS2 -> rs2_data.asSInt,
         A2_IMM -> imm,
-        A2_SIZE -> Mux(uop.rvc, 2.S, 4.S)
+        A2_SIZE -> Mux(uop.rvc, 2.S, 4.S),
+        A2_RS2OH -> ex_op2_oh,
+        A2_IMMOH -> ex_op2_oh
       ))
       alu.io.dw := ctrl.alu_dw
       alu.io.fn := ctrl.alu_fn
