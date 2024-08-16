@@ -485,7 +485,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       !ex_setvcfg_uop.inst(31)        -> ex_setvcfg_uop.inst(30,20))))
     val ex_avl = Mux(ex_setvcfg_uop.ctrl.rxs1,
       Mux(ex_setvcfg_uop.inst(19,15) === 0.U,
-        Mux(ex_setvcfg_uop.inst(11,6) === 0.U, ex_vcfg.get.bits.vl, ex_new_vtype.vlMax),
+        Mux(ex_setvcfg_uop.inst(11,7) === 0.U, ex_vcfg.get.bits.vl, ex_new_vtype.vlMax),
         ex_setvcfg_uop.rs1_data,
       ),
       ex_setvcfg_uop.inst(19,15))
