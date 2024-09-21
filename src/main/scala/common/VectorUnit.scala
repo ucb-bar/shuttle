@@ -41,7 +41,7 @@ class ShuttleVectorCoreIO(implicit p: Parameters) extends CoreBundle()(p) {
     val frs1 = Input(UInt(fLen.W))
   }
 
-  val wb = new Bundle {
+  val com = new Bundle {
     val store_pending = Input(Bool())
     val retire_late = Output(Bool())
     val inst = Output(UInt(32.W))
@@ -62,6 +62,8 @@ class ShuttleVectorCoreIO(implicit p: Parameters) extends CoreBundle()(p) {
     val internal_replay = Output(Bool())
     val block_all = Output(Bool())
   }
+
+  def wb = com
 
   val resp = Decoupled(new Bundle {
     val fp = Bool()
