@@ -72,6 +72,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val mem_uops_reg = Reg(Vec(retireWidth, Valid(new ShuttleUOP)))
   val com_uops_reg = Reg(Vec(retireWidth, Valid(new ShuttleUOP)))
   val com_uops = WireInit(com_uops_reg)
+  val wb_uops_reg = Reg(Vec(retireWidth, Valid(new ShuttleUOP)))
 
   val ex_vcfg = usingVector.option(Reg(Valid(new VConfig)))
   val ex_vcfg_out = ex_vcfg.map(v => WireInit(v))
@@ -90,10 +91,11 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val ex_bypasses: Seq[Bypass] = Seq.fill(retireWidth) { Wire(new Bypass) }
   val mem_bypasses: Seq[Bypass] = Seq.fill(retireWidth) { Wire(new Bypass) }
   val com_bypasses: Seq[Bypass] = Seq.fill(retireWidth) { Wire(new Bypass) }
+  val wb_bypasses: Seq[Bypass] = Seq.fill(retireWidth) { Wire(new Bypass) }
   val ll_bypass: Seq[Bypass] = Seq(Wire(new Bypass))
-  val int_bypasses: Seq[Bypass] = ll_bypass ++ com_bypasses ++ mem_bypasses ++ ex_bypasses
+  val int_bypasses: Seq[Bypass] = ll_bypass ++ wb_bypasses ++ com_bypasses ++ mem_bypasses ++ ex_bypasses
 
-  // not actually bypases. Prevent RAW/WAW
+  // not actually bypasses. Prevent RAW/WAW
   val fp_mem_bypasses: Seq[Bypass] = Seq.fill(retireWidth) { Wire(new Bypass) }
   val fp_com_bypasses: Seq[Bypass] = Seq.fill(retireWidth) { Wire(new Bypass) }
   val fp_bypasses: Seq[Bypass] = fp_com_bypasses ++ fp_mem_bypasses
@@ -111,6 +113,8 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val mem_bsy = mem_uops_reg.map(_.valid).reduce(_||_)
   val com_bsy = com_uops_reg.map(_.valid).reduce(_||_)
 
+  val com_retire = Wire(Vec(retireWidth, Bool()))
+
   // Set up basic pipelining
   for (i <- 0 until retireWidth) {
     when (!ex_stall) {
@@ -124,6 +128,9 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
     when (mem_uops_reg.map(_.valid).orR) { com_uops_reg(i).bits := mem_uops_reg(i).bits }
     com_uops_reg(i).valid := mem_uops_reg(i).valid && !kill_mem
+
+    when (com_uops_reg.map(_.valid).orR) { wb_uops_reg(i).bits := com_uops(i).bits }
+    wb_uops_reg(i).valid := com_retire(i)
   }
 
   if (usingVector) {
@@ -884,7 +891,9 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
   val com_xcpt_uop = com_uops(0)
   val com_xcpt_uop_reg = com_uops_reg(0)
-  val com_retire = (0 until retireWidth).map { i => com_uops_reg(i).valid && !com_uops(i).bits.xcpt && !com_uops(i).bits.needs_replay && !kill_com(i) }
+  for (i <- 0 until retireWidth) {
+    com_retire(i) := com_uops_reg(i).valid && !com_uops(i).bits.xcpt && !com_uops(i).bits.needs_replay && !kill_com(i)
+  }
   csr.io.exception := com_uops_reg(0).valid && !kill_com(0) && com_uops(0).bits.xcpt && !com_uops(0).bits.needs_replay
   csr.io.cause := com_xcpt_uop.bits.xcpt_cause
   csr.io.retire := PopCount(com_retire)
@@ -964,7 +973,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       DebugROB.pushTrace(clock, reset,
         io.hartid, trace(i),
         should_wb,
-        ctrl.wxd && com_uops(i).bits.wdata.valid,
+        false.B,
         rd + Mux(ctrl.wfd, 32.U, 0.U))
       io.trace.insns(i) := DebugROB.popTrace(clock, reset, io.hartid)
     }
@@ -1036,12 +1045,12 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     val fire = com_retire(i)
     val wen = fire && com_uops(i).bits.ctrl.wxd
 
-    when (wen && com_uops(i).bits.wdata.valid) {
-      iregfile(waddr) := wdata
-    }
-    when (wen && !com_uops(i).bits.wdata.valid) {
-      isboard_clear(waddr) := true.B
-    }
+    // when (wen && com_uops(i).bits.wdata.valid) {
+    //   iregfile(waddr) := wdata
+    // }
+    // when (wen && !com_uops(i).bits.wdata.valid) {
+    //   isboard_clear(waddr) := true.B
+    // }
 
     com_bypasses(i).valid := com_uops_reg(i).valid && com_uops_reg(i).bits.ctrl.wxd
     com_bypasses(i).dst := com_uops_reg(i).bits.rd
@@ -1112,6 +1121,30 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     }
   }
 
+  // wb
+  for (i <- 0 until retireWidth) {
+    val uop = wb_uops_reg(i).bits
+    val wen = wb_uops_reg(i).valid && uop.ctrl.wxd
+    when (wen && !uop.wdata.valid) {
+      isboard_clear(uop.rd) := true.B
+    }
+    when (wen && uop.wdata.valid) {
+      iregfile(uop.rd) := uop.wdata.bits
+      isboard_set(uop.rd) := true.B
+    }
+    DebugROB.pushWb(clock, reset, io.hartid,
+      wen && uop.wdata.valid,
+      uop.rd,
+      uop.wdata.bits)
+
+
+    wb_bypasses(i).valid := wb_uops_reg(i).valid && wb_uops_reg(i).bits.ctrl.wxd
+    wb_bypasses(i).dst := wb_uops_reg(i).bits.rd
+    wb_bypasses(i).can_bypass := wb_uops_reg(i).bits.wdata.valid
+    wb_bypasses(i).data := wb_uops_reg(i).bits.wdata.bits
+  }
+
+
   // ll wb
   val dmem_xpu = !io.dmem.resp.bits.tag(0)
   val dmem_fpu =  io.dmem.resp.bits.tag(0)
@@ -1127,9 +1160,9 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val ll_arb = Module(new Arbiter(new LLWB, if (usingVector) 4 else 3))
   ll_arb.io.out.ready := true.B
 
-  ll_arb.io.in(0).valid := io.dmem.resp.valid && io.dmem.resp.bits.has_data && dmem_xpu
-  ll_arb.io.in(0).bits.waddr := dmem_waddr
-  ll_arb.io.in(0).bits.wdata := dmem_wdata
+  ll_arb.io.in(0).valid := RegNext(io.dmem.resp.valid && io.dmem.resp.bits.has_data && dmem_xpu, false.B)
+  ll_arb.io.in(0).bits.waddr := RegEnable(dmem_waddr, io.dmem.resp.valid)
+  ll_arb.io.in(0).bits.wdata := RegEnable(dmem_wdata, io.dmem.resp.valid)
 
   ll_arb.io.in(1).valid := div.io.resp.valid
   div.io.resp.ready := ll_arb.io.in(1).ready
@@ -1164,10 +1197,10 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     DebugROB.pushWb(clock, reset, io.hartid, ll_wen && ll_waddr =/= 0.U, ll_waddr, ll_wdata)
 
 
-  val fp_load_val = RegNext(io.dmem.resp.valid && io.dmem.resp.bits.has_data && dmem_fpu)
-  val fp_load_type = RegNext(io.dmem.resp.bits.size - typeTagWbOffset)
-  val fp_load_addr = RegNext(io.dmem.resp.bits.tag(5,1))
-  val fp_load_data = RegNext(io.dmem.resp.bits.data)
+  val fp_load_val = RegNext(io.dmem.resp.valid && io.dmem.resp.bits.has_data && dmem_fpu, false.B)
+  val fp_load_type = RegEnable(io.dmem.resp.bits.size - typeTagWbOffset, io.dmem.resp.valid)
+  val fp_load_addr = RegEnable(io.dmem.resp.bits.tag(5,1), io.dmem.resp.valid)
+  val fp_load_data = RegEnable(io.dmem.resp.bits.data, io.dmem.resp.valid)
 
   val ll_fp_wval = WireInit(fp_load_val)
   val ll_fp_wdata = WireInit(0.U(65.W))

@@ -25,8 +25,7 @@ class ShuttleDMemResp(implicit p: Parameters) extends CoreBundle()(p) with HasL1
   val has_data = Bool()
   val tag  = UInt((coreParams.dcacheReqTagBits + log2Ceil(dcacheArbPorts)).W)
   val data = UInt(coreDataBits.W)
-    val size = UInt(log2Ceil(coreDataBytes.log2 + 1).W)
-  
+  val size = UInt(log2Ceil(coreDataBytes.log2 + 1).W)
 }
 
 class ShuttleMSHRReq(implicit p: Parameters) extends ShuttleDMemReq {
