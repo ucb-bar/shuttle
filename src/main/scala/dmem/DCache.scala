@@ -85,6 +85,7 @@ class ShuttleDCacheIO(implicit p: Parameters) extends CoreBundle()(p) {
   val s2_kill = Output(Bool()) // kill req from two cycles ago
 
   val resp = Flipped(Valid(new ShuttleDMemResp))
+  val s2_hit = Input(Bool())
   val ordered = Input(Bool())
   val store_pending = Input(Bool())
 
@@ -514,6 +515,7 @@ class ShuttleDCacheModule(outer: ShuttleDCache) extends LazyModuleImp(outer)
 
   io.s2_nack := s2_valid && s2_nack
   io.resp := Mux(mshrs.io.resp.ready, uncache_resp, cache_resp)
+  io.s2_hit := s2_valid && !s2_nack && s2_hit
 
   val replay_arb = Module(new Arbiter(new ShuttleDMemResp, 2))
   replay_arb.io.in(0) <> replay_data_q.io.deq
