@@ -756,15 +756,17 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       com_uops_reg(i).bits.xcpt_cause := cause
     }
 
+    val sfb_shadow_kill = WireInit(false.B)
     if (i == 1) {
       when (mem_uops_reg(1).bits.sfb_shadow && mem_brjmp_taken) {
+        sfb_shadow_kill := true.B
         com_uops_reg(1).valid := false.B
       }
     }
 
-    mem_bypasses(i).valid := mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.wxd
+    mem_bypasses(i).valid := mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.wxd && !sfb_shadow_kill
     mem_bypasses(i).dst := mem_uops_reg(i).bits.rd
-    mem_bypasses(i).can_bypass := mem_uops_reg(i).bits.wdata.valid && !mem_uops_reg(i).bits.sfb_shadow
+    mem_bypasses(i).can_bypass := mem_uops_reg(i).bits.wdata.valid
     mem_bypasses(i).data := mem_uops_reg(i).bits.wdata.bits
 
     fp_mem_bypasses(i).valid := mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.wfd
