@@ -95,6 +95,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val wb_bypasses: Seq[Bypass] = Seq.fill(retireWidth) { Wire(new Bypass) }
   val ll_bypass: Seq[Bypass] = Seq(Wire(new Bypass))
   val int_bypasses: Seq[Bypass] = ll_bypass ++ wb_bypasses ++ com_bypasses ++ mem_bypasses ++ ex_bypasses
+  for (bypass <- int_bypasses) dontTouch(bypass)
 
   // not actually bypasses. Prevent RAW/WAW
   val fp_mem_bypasses: Seq[Bypass] = Seq.fill(retireWidth) { Wire(new Bypass) }
@@ -1055,14 +1056,11 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     val waddr = com_uops(i).bits.rd
     val wdata = com_uops(i).bits.wdata.bits
     val fire = com_retire(i)
-    val wen = fire && com_uops(i).bits.ctrl.wxd
 
-    // when (wen && com_uops(i).bits.wdata.valid) {
-    //   iregfile(waddr) := wdata
-    // }
-    // when (wen && !com_uops(i).bits.wdata.valid) {
-    //   isboard_clear(waddr) := true.B
-    // }
+    when (com_uops(i).bits.ctrl.wxd && com_uops(i).bits.ctrl.mem && io.dmem.s2_hit) {
+      com_uops(i).bits.wdata.valid := true.B
+      com_uops(i).bits.wdata.bits := io.dmem.resp.bits.data
+    }
 
     com_bypasses(i).valid := com_uops_reg(i).valid && com_uops_reg(i).bits.ctrl.wxd
     com_bypasses(i).dst := com_uops_reg(i).bits.rd
@@ -1197,7 +1195,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val ll_arb = Module(new Arbiter(new LLWB, if (usingVector) 4 else 3))
   ll_arb.io.out.ready := true.B
 
-  ll_arb.io.in(0).valid := RegNext(io.dmem.resp.valid && io.dmem.resp.bits.has_data && dmem_xpu, false.B)
+  ll_arb.io.in(0).valid := RegNext(io.dmem.resp.valid && !io.dmem.s2_hit && io.dmem.resp.bits.has_data && dmem_xpu, false.B)
   ll_arb.io.in(0).bits.waddr := RegEnable(dmem_waddr, io.dmem.resp.valid)
   ll_arb.io.in(0).bits.wdata := RegEnable(dmem_wdata, io.dmem.resp.valid)
 
