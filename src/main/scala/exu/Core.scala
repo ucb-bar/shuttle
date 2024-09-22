@@ -349,7 +349,13 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
         w.valid && w.bits === rs2
       }
     }}).orR
-    val rd_same_hazard  = rrd_irf_writes.take(i).map(w => w.valid && w.bits === rd).orR
+    val rd_same_hazard  = rrd_irf_writes.take(i).zipWithIndex.map ({case (w,x) => {
+      if (x == 0) {
+        w.valid && w.bits === rd && !rrd_uops(0).bits.uses_alu && !rrd_uops(i).bits.uses_latealu
+      } else {
+        w.valid && w.bits === rd
+      }
+    }}).orR
 
     val rs1_data_hazard = (rs1_older_hazard || rs1_same_hazard) && ctrl.rxs1 && rs1 =/= 0.U
     val rs2_data_hazard = (rs2_older_hazard || rs2_same_hazard) && ctrl.rxs2 && rs2 =/= 0.U
@@ -393,6 +399,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   var stall_due_to_older = false.B
   var rrd_found_mem = false.B
   var rrd_found_setvcfg = false.B
+  var rrd_found_brjmp = false.B
   for (i <- 0 until retireWidth) {
     val uop = rrd_uops(i).bits
     val ctrl = uop.ctrl
@@ -401,6 +408,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     val rrd_fence_stall = (i == 0).B && ((uop.system_insn || ctrl.fence || uop.sfence || ctrl.fence_i || amo_fence) &&
       (ex_bsy || mem_bsy || com_bsy || isboard_bsy || fsboard_bsy || !io.dmem.ordered || io.rocc.busy || vec_bsy))
     val rrd_rocc_stall = (i == 0).B && ctrl.rocc && !io.rocc.cmd.ready
+    val brjmp = uop.uses_brjmp || uop.next_pc.valid
     val is_pipe0 = (uop.system_insn
       || (uop.sfb_shadow && (!uop.uses_alu || uop.uses_brjmp))
       || (uop.sfb_shadow && !uop.rvc)
@@ -419,7 +427,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       || ctrl.rocc
       || uop.uses_fp
     )
-    val is_youngest = (uop.uses_brjmp && !uop.sfb_br) || uop.next_pc.valid || uop.xcpt || uop.csr_en || uop.system_insn
+    val is_youngest = uop.xcpt || uop.csr_en || uop.system_insn
     rrd_stall(i) := (
       (rrd_stall_data(i))                      ||
       (rrd_fence_stall)                        ||
@@ -427,6 +435,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       (is_pipe0 && (i != 0).B)                 ||
       (rrd_found_mem && ctrl.mem)              ||
       (rrd_found_setvcfg && uop.sets_vcfg)     ||
+      (rrd_found_brjmp && brjmp)               ||
       (stall_due_to_older)                     ||
       (csr.io.csr_stall)                       ||
       (ex_stall)
@@ -434,6 +443,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
     stall_due_to_older = rrd_stall(i) || is_youngest
     rrd_found_mem = rrd_found_mem || ctrl.mem
+    rrd_found_brjmp = rrd_found_brjmp || brjmp
     rrd_found_setvcfg = rrd_found_setvcfg || uop.sets_vcfg
   }
 
@@ -623,6 +633,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   fp_pipe.io.s1_kill := kill_mem
 
   val mem_brjmp_oh = mem_uops_reg.map({u => u.valid && (u.bits.uses_brjmp || u.bits.next_pc.valid)})
+  assert(PopCount(mem_brjmp_oh) <= 1.U)
   val mem_brjmp_val = mem_brjmp_oh.reduce(_||_)
   val mem_brjmp_uop = Mux1H(mem_brjmp_oh, mem_uops_reg).bits
   val mem_brjmp_ctrl = mem_brjmp_uop.ctrl
@@ -758,9 +769,24 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
     val sfb_shadow_kill = WireInit(false.B)
     if (i == 1) {
-      when (mem_uops_reg(1).bits.sfb_shadow && mem_brjmp_taken) {
+      when (mem_brjmp_taken && mem_uops_reg(i).bits.sfb_shadow) {
         sfb_shadow_kill := true.B
         com_uops_reg(1).valid := false.B
+      }
+    }
+
+    if (i >= 1) {
+      when (mem_brjmp_oh.take(i).orR && !mem_uops_reg(i).bits.sfb_shadow && mem_brjmp_mispredict) {
+        com_uops_reg(i).valid := false.B
+        when (mem_uops_reg(i).bits.ctrl.mem) {
+          io.dmem.s1_kill := true.B
+        }
+        when (mem_uops_reg(i).bits.uses_fp) {
+          fp_pipe.io.s1_kill := true.B
+        }
+        when (mem_uops_reg(i).bits.ctrl.vec || shuttleParams.vector.map(_.issueVConfig).getOrElse(false).B && mem_uops_reg(0).bits.sets_vcfg) {
+          io.vector.foreach(_.mem.kill := true.B)
+        }
       }
     }
 
@@ -769,7 +795,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     mem_bypasses(i).can_bypass := mem_uops_reg(i).bits.wdata.valid
     mem_bypasses(i).data := mem_uops_reg(i).bits.wdata.bits
 
-    fp_mem_bypasses(i).valid := mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.wfd
+    fp_mem_bypasses(i).valid := mem_uops_reg(i).valid && mem_uops_reg(i).bits.ctrl.wfd && !sfb_shadow_kill
     fp_mem_bypasses(i).dst := mem_uops_reg(i).bits.rd
     fp_mem_bypasses(i).can_bypass := false.B
     fp_mem_bypasses(i).data := DontCare
