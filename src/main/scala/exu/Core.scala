@@ -372,6 +372,11 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     rrd_uops(i).bits.uses_latealu := rrd_uops(i).bits.uses_alu && ((rs1_w0_hit && rs1_can_forward_from_w_p0) || (rs2_w0_hit && rs2_can_forward_from_w_p0)) && enableLateALU.B && !sfb_shadow
     rrd_uops(i).bits.sfb_shadow := sfb_shadow
 
+    dontTouch(rs1_data_hazard)
+    dontTouch(rs2_data_hazard)
+    dontTouch(rd_data_hazard)
+    dontTouch(rrd_stall_data(i))
+
     rrd_irf_writes(i).valid := rrd_uops(i).valid && rrd_uops(i).bits.ctrl.wxd
     rrd_irf_writes(i).bits := rrd_uops(i).bits.rd
 
@@ -1223,7 +1228,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val ll_arb = Module(new Arbiter(new LLWB, if (usingVector) 4 else 3))
   ll_arb.io.out.ready := true.B
 
-  ll_arb.io.in(0).valid := RegNext(io.dmem.resp.valid && !io.dmem.s2_hit && io.dmem.resp.bits.has_data && dmem_xpu, false.B)
+  ll_arb.io.in(0).valid := RegNext(io.dmem.resp.valid && (!io.dmem.s2_hit || io.dmem.s2_kill) && io.dmem.resp.bits.has_data && dmem_xpu, false.B)
   ll_arb.io.in(0).bits.waddr := RegEnable(dmem_waddr, io.dmem.resp.valid)
   ll_arb.io.in(0).bits.wdata := RegEnable(dmem_wdata, io.dmem.resp.valid)
 
