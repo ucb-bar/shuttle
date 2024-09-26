@@ -1194,6 +1194,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     val uop = wb_uops(i).bits
     val wen = wb_uops(i).valid && uop.ctrl.wxd
     when (wen && !uop.wdata.valid) {
+      isboard_set(uop.rd) := false.B
       isboard_clear(uop.rd) := true.B
     }
     when (wen && uop.wdata.valid) {
