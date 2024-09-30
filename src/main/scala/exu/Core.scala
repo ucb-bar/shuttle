@@ -1201,10 +1201,12 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       iregfile(uop.rd) := uop.wdata.bits
       isboard_set(uop.rd) := true.B
     }
-    DebugROB.pushWb(clock, reset, io.hartid,
-      wen && uop.wdata.valid,
-      uop.rd,
-      uop.wdata.bits)
+
+    if (useDebugROB)
+      DebugROB.pushWb(clock, reset, io.hartid,
+        wen && uop.wdata.valid,
+        uop.rd,
+        uop.wdata.bits)
 
 
     wb_bypasses(i).valid := wb_uops(i).valid && wb_uops(i).bits.ctrl.wxd
