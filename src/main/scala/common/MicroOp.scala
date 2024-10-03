@@ -36,6 +36,7 @@ class ShuttleUOP(implicit p: Parameters) extends CoreBundle {
   val rs2_data = UInt(64.W)
   val rs3_data = UInt(64.W)
   val uses_memalu = Bool()
+  val uses_latealu = Bool()
 
   val wdata = Valid(UInt(64.W))
 

@@ -61,6 +61,7 @@ class ShuttleDCacheArbiter(n: Int)(implicit p: Parameters) extends Module
       io.requestor(i).perf := io.mem.perf
       io.requestor(i).s2_nack := io.mem.s2_nack && s2_id === i.U
       io.requestor(i).clock_enabled := io.mem.clock_enabled
+      io.requestor(i).s2_hit := io.mem.s2_hit && s2_id === i.U
       resp.bits := io.mem.resp.bits
       resp.bits.tag := io.mem.resp.bits.tag >> log2Up(n)
     }

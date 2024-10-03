@@ -25,6 +25,7 @@ case class ShuttleCoreParams(
   nL2TLBWays: Int = 1,
 
   enableMemALU: Boolean = true,
+  enableLateALU: Boolean = true,
   retireWidth: Int = 2,
   fetchWidth: Int = 4,
   debugROB: Boolean = false,

@@ -24,7 +24,7 @@ class WithNShuttleCores(
         ShuttleTileAttachParams(
           tileParams = ShuttleTileParams(
             core = ShuttleCoreParams(retireWidth = retireWidth),
-            btb = Some(BTBParams(nEntries=32)),
+            btb = Some(BTBParams(nEntries=32, bhtParams = Some(BHTParams(counterLength=2)))),
             icache = Some(
               ICacheParams(rowBits = -1, nSets=64, nWays=8, fetchBytes=2*4)
             ),

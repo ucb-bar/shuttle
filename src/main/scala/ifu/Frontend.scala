@@ -112,8 +112,6 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   btb.io.flush := false.B
   btb.io.btb_update := io.cpu.btb_update
   btb.io.bht_update := io.cpu.bht_update
-  btb.io.bht_advance.valid := false.B
-  btb.io.bht_advance.bits := DontCare
 
   // --------------------------------------------------------
   // **** NextPC Select (F0) ****
@@ -177,6 +175,9 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
     s0_is_replay := false.B
     s0_ras_head  := s1_ras_head
   }
+
+  btb.io.bht_advance.valid := s1_valid && btb.io.resp.valid
+  btb.io.bht_advance.bits := btb.io.resp.bits
 
   // --------------------------------------------------------
   // **** ICache Response (F2) ****
