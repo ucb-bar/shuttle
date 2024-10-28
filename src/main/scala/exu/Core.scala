@@ -235,6 +235,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     rrd_illegal_insn(i) := (!ctrl.legal ||
       (ctrl.fp && fp_illegal) ||
       (ctrl.rocc && csr.io.decode(i).rocc_illegal) ||
+      (uop.sets_vcfg && csr.io.decode(0).vector_illegal) ||
       (ctrl.vec && (csr.io.decode(0).vector_illegal || rrd_vcfg.map(_.vtype.vill).getOrElse(true.B))) ||
       (csr_en && (csr_ren_illegal || csr_wen_illegal)) ||
       (!uop.rvc && ((sfence || system_insn) && csr.io.decode(i).system_illegal))
