@@ -12,6 +12,8 @@ Shuttle is tape-out proven, and has similar physical design complexity as Rocket
 
 ## Versioning
 
+Only the latest version will be maintained.
+
 * **1.0**: Initial 6-stage RV64GC Release
 * **1.1**: Support integration with vector units
 * **1.2**: Support B-extension (Zba/Zbb/Zbs)
