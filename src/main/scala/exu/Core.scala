@@ -9,6 +9,7 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.rocket.ALU._
+import freechips.rocketchip.trace.{TraceCoreParams, TraceCoreInterface, TraceCoreIngress}
 
 import shuttle.common._
 import shuttle.ifu._
@@ -28,6 +29,9 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val shuttleParams = coreParams.asInstanceOf[ShuttleCoreParams]
   val nTotalRoCCCSRs = tile.roccCSRs.flatten.size
 
+  def traceIngressParams = TraceCoreParams(nGroups = coreParams.retireWidth, iretireWidth = coreParams.retireWidth, 
+                                          xlen = coreParams.xLen, iaddrWidth = coreParams.xLen) 
+
   val io = IO(new Bundle {
     val hartid = Input(UInt(hartIdLen.W))
     val interrupts = Input(new CoreInterrupts(false))
@@ -39,6 +43,9 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     val trace = Output(new TraceBundle)
     val fcsr_rm = Output(UInt(FPConstants.RM_SZ.W))
     val vector = if (usingVector) Some(Flipped(new ShuttleVectorCoreIO)) else None
+    val trace_core_ingress = if (shuttleParams.enableTraceCoreIngress) 
+      Some(Output(new TraceCoreInterface(traceIngressParams))) else None
+    val traceStall = Input(Bool())
   })
 
   val debug_tsc_reg = RegInit(0.U(64.W))
@@ -443,7 +450,8 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       (rrd_found_brjmp && brjmp)               ||
       (stall_due_to_older)                     ||
       (csr.io.csr_stall)                       ||
-      (ex_stall)
+      (ex_stall)                               ||
+      (io.traceStall)
     )
 
     stall_due_to_older = rrd_stall(i) || is_youngest
@@ -1177,6 +1185,30 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
           com_uops(i).bits.needs_replay := true.B
         }
       }
+    }
+  }
+
+  // trace ingress
+  if (shuttleParams.enableTraceCoreIngress) {
+    for (i <- 0 until retireWidth) {
+      val trace_ingress = Module(new TraceCoreIngress(traceIngressParams))
+      trace_ingress.io.in.valid := com_retire(i) || csr.io.trace(i).exception
+      trace_ingress.io.in.taken := com_uops_reg(i).bits.taken
+      trace_ingress.io.in.is_branch := com_uops_reg(i).bits.ctrl.branch
+      trace_ingress.io.in.is_jal := com_uops_reg(i).bits.ctrl.jal
+      trace_ingress.io.in.is_jalr := com_uops_reg(i).bits.ctrl.jalr
+      trace_ingress.io.in.insn := com_uops_reg(i).bits.inst
+      trace_ingress.io.in.pc := com_uops_reg(i).bits.pc
+      trace_ingress.io.in.is_compressed := !com_uops_reg(i).bits.raw_inst(1, 0).andR // 2'b11 is uncompressed, everything else is compressed
+      trace_ingress.io.in.interrupt := csr.io.trace(i).interrupt && csr.io.trace(i).exception
+      trace_ingress.io.in.exception := !csr.io.trace(i).interrupt && csr.io.trace(i).exception
+      trace_ingress.io.in.trap_return := csr.io.trap_return
+
+      io.trace_core_ingress.get.group(i) <> trace_ingress.io.out
+      io.trace_core_ingress.get.priv := csr.io.trace(i).priv 
+      io.trace_core_ingress.get.tval := csr.io.tval
+      io.trace_core_ingress.get.cause := csr.io.cause
+      io.trace_core_ingress.get.time := csr.io.time
     }
   }
 
