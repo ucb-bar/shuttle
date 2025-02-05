@@ -784,14 +784,16 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     if (i >= 1) {
       when (mem_brjmp_oh.take(i).orR && !mem_uops_reg(i).bits.sfb_shadow && mem_brjmp_mispredict) {
         com_uops_reg(i).valid := false.B
-        when (mem_uops_reg(i).bits.ctrl.mem) {
-          io.dmem.s1_kill := true.B
-        }
-        when (mem_uops_reg(i).bits.uses_fp) {
-          fp_pipe.io.s1_kill := true.B
-        }
-        when (mem_uops_reg(i).bits.ctrl.vec || shuttleParams.vector.map(_.issueVConfig).getOrElse(false).B && mem_uops_reg(0).bits.sets_vcfg) {
-          io.vector.foreach(_.mem.kill := true.B)
+        when (mem_uops_reg(i).valid) {
+          when (mem_uops_reg(i).bits.ctrl.mem) {
+            io.dmem.s1_kill := true.B
+          }
+          when (mem_uops_reg(i).bits.uses_fp) {
+            fp_pipe.io.s1_kill := true.B
+          }
+          when (mem_uops_reg(i).bits.ctrl.vec || shuttleParams.vector.map(_.issueVConfig).getOrElse(false).B && mem_uops_reg(0).bits.sets_vcfg) {
+            io.vector.foreach(_.mem.kill := true.B)
+          }
         }
       }
     }
