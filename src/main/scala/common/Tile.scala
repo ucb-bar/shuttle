@@ -20,7 +20,7 @@ import shuttle.dmem.{ShuttleSGTCMParams, SGTCM}
 import shuttle.ifu._
 import shuttle.exu._
 import shuttle.dmem._
-
+import freechips.rocketchip.trace.{TraceEncoderParams, TraceEncoderController, TraceSinkArbiter}
 
 trait TCMParams {
   def base: BigInt
@@ -44,7 +44,9 @@ case class ShuttleTileParams(
   sgtcm: Option[ShuttleSGTCMParams] = None,
   tileId: Int = 0,
   tileBeatBytes: Int = 8,
-  boundaryBuffers: Boolean = false) extends InstantiableTileParams[ShuttleTile]
+  boundaryBuffers: Boolean = false,
+  traceParams: Option[TraceEncoderParams] = None
+  ) extends InstantiableTileParams[ShuttleTile]
 {
   require(icache.isDefined)
   def instantiate(crossing: HierarchicalElementCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters): ShuttleTile = {
@@ -92,6 +94,7 @@ class ShuttleTile private(
 
   val intOutwardNode = None
   val masterNode = visibilityNode
+  val tcmSlaveNode = TLIdentityNode()
   val slaveNode = TLIdentityNode()
 
   val cpuDevice: SimpleDevice = new SimpleDevice("cpu", Seq("ucb-bar,shuttle", "riscv")) {
@@ -212,6 +215,24 @@ class ShuttleTile private(
     vector_unit.foreach { vu => sgtcmXbar.node :=* vu.sgNode.get }
   }}
 
+  val trace_encoder_controller = shuttleParams.traceParams.map { t =>
+    val trace_encoder_controller = LazyModule(new TraceEncoderController(t.encoderBaseAddr, shuttleParams.tileBeatBytes))
+    connectTLSlave(trace_encoder_controller.node, shuttleParams.tileBeatBytes)
+    trace_encoder_controller
+  }
+
+  val trace_encoder = shuttleParams.traceParams match {
+    case Some(t) => Some(t.buildEncoder(p))
+    case None => None
+  }
+
+  val (trace_sinks, traceSinkIds) = shuttleParams.traceParams match {
+    case Some(t) => t.buildSinks.map {_(p)}.unzip
+    case None => (Nil, Nil)
+  }
+
+  DisableMonitors { implicit p => tlSlaveXbar.node :*= slaveNode }
+  
   if (shuttleParams.tcm.isDefined || shuttleParams.sgtcm.isDefined) {
 
     // Connect to slavebar to the slaveport into the tile
@@ -229,7 +250,7 @@ class ShuttleTile private(
         ) else None
         Some(tcmMatch.getOrElse(sgtcmMatch.getOrElse(m)))
       })
-      := slaveNode)
+      := tcmSlaveNode)
 
     // Connect the slavebar to the master bar
     (tlSlaveXbar.node
@@ -245,6 +266,7 @@ class ShuttleTile private(
     := tlMasterXbar.node)
   }
   masterNode :=* tlOtherMastersNode
+
 
 
   override lazy val module = new ShuttleTileModuleImp(this)
@@ -397,4 +419,27 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
 
   dcacheArb.io.requestor <> dcachePorts
   ptw.io.requestor <> ptwPorts
+
+  if (outer.shuttleParams.traceParams.isDefined) {
+    core.io.trace_core_ingress.get <> outer.trace_encoder.get.module.io.in
+    outer.trace_encoder_controller.foreach { lm =>
+      outer.trace_encoder.get.module.io.control <> lm.module.io.control
+    }
+
+    val trace_sink_arbiter = Module(new TraceSinkArbiter(outer.traceSinkIds, 
+      use_monitor = outer.shuttleParams.traceParams.get.useArbiterMonitor, 
+      monitor_name = outer.shuttleParams.uniqueName))
+
+    trace_sink_arbiter.io.target := outer.trace_encoder.get.module.io.control.target
+    trace_sink_arbiter.io.in <> outer.trace_encoder.get.module.io.out 
+
+    core.io.traceStall := outer.trace_encoder.get.module.io.stall
+
+    outer.trace_sinks.zip(outer.traceSinkIds).foreach { case (sink, id) =>
+      val index = outer.traceSinkIds.indexOf(id)
+      sink.module.io.trace_in <> trace_sink_arbiter.io.out(index)
+    }
+  } else {
+    core.io.traceStall := outer.traceAuxSinkNode.bundle.stall
+  }
 }
