@@ -94,7 +94,6 @@ class ShuttleTile private(
 
   val intOutwardNode = None
   val masterNode = visibilityNode
-  val tcmSlaveNode = TLIdentityNode()
   val slaveNode = TLIdentityNode()
 
   val cpuDevice: SimpleDevice = new SimpleDevice("cpu", Seq("ucb-bar,shuttle", "riscv")) {
@@ -183,6 +182,8 @@ class ShuttleTile private(
   }
   vector_unit.foreach(vu => tlOtherMastersNode :=* vu.tlNode)
 
+  val tcmSlaveXbar = ((shuttleParams.tcm.isDefined || shuttleParams.sgtcm.isDefined)).option(TLXbar())
+
   shuttleParams.tcm.foreach { tcmParams => DisableMonitors { implicit p =>
     val device = new MemoryDevice
     for (b <- 0 until tcmParams.banks) {
@@ -195,7 +196,7 @@ class ShuttleTile private(
         devOverride = Some(device),
         devName = Some(s"Core $tileId TCM bank $b")
       ))
-      tcm.node := TLFragmenter(shuttleParams.tileBeatBytes, p(CacheBlockBytes)) := TLBuffer() := tlSlaveXbar.node
+      tcm.node := TLFragmenter(shuttleParams.tileBeatBytes, p(CacheBlockBytes)) := TLBuffer() := tcmSlaveXbar.get
     }
   }}
 
@@ -210,7 +211,7 @@ class ShuttleTile private(
       devOverride = Some(device),
       devName = Some(s"Core $tileId SGTCM")
     ))
-    sgtcm.node := TLWidthWidget(shuttleParams.tileBeatBytes) := tlSlaveXbar.node
+    sgtcm.node := TLWidthWidget(shuttleParams.tileBeatBytes) := tcmSlaveXbar.get
     sgtcm.sgnode :*= sgtcmXbar.node
     vector_unit.foreach { vu => sgtcmXbar.node :=* vu.sgNode.get }
   }}
@@ -232,11 +233,10 @@ class ShuttleTile private(
   }
 
   DisableMonitors { implicit p => tlSlaveXbar.node :*= slaveNode }
-  
-  if (shuttleParams.tcm.isDefined || shuttleParams.sgtcm.isDefined) {
 
+  tcmSlaveXbar.map { tcmSlaveXbar =>
     // Connect to slavebar to the slaveport into the tile
-    (tlSlaveXbar.node
+    (tcmSlaveXbar
       := tcmSlaveReplicator(shuttleParams.tcm)
       := tcmSlaveReplicator(shuttleParams.sgtcm)
       := TLFilter({m =>
@@ -250,10 +250,10 @@ class ShuttleTile private(
         ) else None
         Some(tcmMatch.getOrElse(sgtcmMatch.getOrElse(m)))
       })
-      := tcmSlaveNode)
+      := tlSlaveXbar.node)
 
     // Connect the slavebar to the master bar
-    (tlSlaveXbar.node
+    (tcmSlaveXbar
       := tcmMasterReplicator(shuttleParams.tcm)
       := tcmMasterReplicator(shuttleParams.sgtcm)
       := tlMasterXbar.node)
@@ -266,8 +266,6 @@ class ShuttleTile private(
     := tlMasterXbar.node)
   }
   masterNode :=* tlOtherMastersNode
-
-
 
   override lazy val module = new ShuttleTileModuleImp(this)
 
