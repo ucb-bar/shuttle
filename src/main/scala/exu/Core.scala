@@ -775,22 +775,19 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
     val sfb_shadow_kill = WireInit(false.B)
     if (i == 1) {
-      when (mem_brjmp_taken && mem_uops_reg(i).bits.sfb_shadow) {
+      when (mem_brjmp_taken && mem_uops_reg(i).bits.sfb_shadow && mem_brjmp_sfb) {
         sfb_shadow_kill := true.B
         com_uops_reg(1).valid := false.B
       }
     }
 
+
     if (i >= 1) {
-      when (mem_brjmp_oh.take(i).orR && !mem_uops_reg(i).bits.sfb_shadow && mem_brjmp_mispredict) {
+      when (mem_brjmp_oh.take(i).orR && !mem_uops_reg(i).bits.sfb_shadow && mem_brjmp_mispredict && !mem_brjmp_sfb) {
         com_uops_reg(i).valid := false.B
         when (mem_uops_reg(i).valid) {
-          when (mem_uops_reg(i).bits.ctrl.mem) {
-            io.dmem.s1_kill := true.B
-          }
-          when (mem_uops_reg(i).bits.uses_fp) {
-            fp_pipe.io.s1_kill := true.B
-          }
+          when (mem_uops_reg(i).bits.ctrl.mem) { io.dmem.s1_kill := true.B }
+          when (mem_uops_reg(i).bits.uses_fp) { fp_pipe.io.s1_kill := true.B }
           when (mem_uops_reg(i).bits.ctrl.vec || shuttleParams.vector.map(_.issueVConfig).getOrElse(false).B && mem_uops_reg(0).bits.sets_vcfg) {
             io.vector.foreach(_.mem.kill := true.B)
           }
@@ -1013,7 +1010,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     val trace = WireInit(csr.io.trace)
     for (i <- 0 until retireWidth) {
       val pc = if (usingVector) Mux(io.vector.get.com.retire_late, io.vector.get.com.pc, com_uops(i).bits.pc) else com_uops(i).bits.pc
-      trace(i).valid := csr.io.trace(i).valid && !csr.io.trace.take(i).map(_.exception).orR
+      trace(i).valid := com_retire(i) || ((i == 0).B && csr.io.exception)
       trace(i).wdata.get := com_uops(i).bits.wdata.bits
       trace(i).iaddr := pc
       val ctrl = com_uops(i).bits.ctrl
