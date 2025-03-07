@@ -12,7 +12,7 @@ import freechips.rocketchip.tile._
 
 import shuttle.common._
 
-class ShuttleFPPipe(implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetimed {
+class ShuttleFPPipe(implicit p: Parameters) extends FPUModule()(p) {
   val latency = tileParams.core.fpu.get.dfmaLatency
   val io = IO(new Bundle {
     val in = Input(Valid(new ShuttleUOP))

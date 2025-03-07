@@ -139,7 +139,7 @@ class ShuttleBTB(implicit p: Parameters) extends BtbModule {
   }
 
   if (btbParams.bhtParams.nonEmpty) {
-    val bht = new BHT(Annotated.params(this, btbParams.bhtParams.get))
+    val bht = new BHT(btbParams.bhtParams.get)
     val isBranch = (idxHit & cfiType.map(_ === CFIType.branch).asUInt).orR
     val res = bht.get(io.req.bits.addr)
     when (io.bht_advance.valid) {
