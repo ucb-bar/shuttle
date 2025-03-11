@@ -132,10 +132,10 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   // **** ICache Access (F1) ****
   //      Translate VPC
   // --------------------------------------------------------
-  val s1_vpc       = RegNext(s0_vpc)
-  val s1_ras_head  = WireInit(RegNext(s0_ras_head))
+  val s1_vpc       = RegEnable(s0_vpc, s0_valid)
+  val s1_ras_head  = WireInit(RegEnable(s0_ras_head, s0_valid))
   val s1_valid     = RegNext(s0_valid, false.B)
-  val s1_is_replay = RegNext(s0_is_replay)
+  val s1_is_replay = RegEnable(s0_is_replay, s0_valid)
   val f1_clear     = WireInit(false.B)
 
   tlb.io.req.valid      := (s1_valid && !s1_is_replay && !f1_clear && !io.cpu.sfence.valid)
@@ -152,10 +152,12 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   btb.io.req.valid := s1_valid && !io.cpu.sfence.valid
   btb.io.req.bits.addr := fetchAlign(s1_vpc)
 
+  val s1_replay_resp = RegEnable(s0_replay_resp, s0_is_replay)
+  val s1_replay_ppc = RegEnable(s0_replay_ppc, s0_is_replay)
 
   val s1_tlb_miss = !s1_is_replay && (tlb.io.resp.miss || io.cpu.sfence.valid)
-  val s1_tlb_resp = Mux(s1_is_replay, RegNext(s0_replay_resp), tlb.io.resp)
-  val s1_ppc  = Mux(s1_is_replay, RegNext(s0_replay_ppc), tlb.io.resp.paddr)
+  val s1_tlb_resp = Mux(s1_is_replay, s1_replay_resp, tlb.io.resp)
+  val s1_ppc  = Mux(s1_is_replay, s1_replay_ppc, tlb.io.resp.paddr)
 
   icache.io.s1_paddr := s1_ppc
   icache.io.s1_kill  := tlb.io.resp.miss || f1_clear
@@ -184,21 +186,22 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   // --------------------------------------------------------
 
   val s2_valid = RegNext(s1_valid && !f1_clear, false.B)
-  val s2_vpc   = RegNext(s1_vpc)
-  val s2_ppc  = RegNext(s1_ppc)
-  val s2_ras_head = RegNext(s1_ras_head)
+  val s2_vpc   = RegEnable(s1_vpc, s1_valid)
+  val s2_ppc  = RegEnable(s1_ppc, s1_valid)
+  val s2_ras_head = RegEnable(s1_ras_head, s1_valid)
   val f2_clear = WireInit(false.B)
-  val s2_tlb_resp = RegNext(s1_tlb_resp)
-  val s2_tlb_miss = RegNext(s1_tlb_miss)
-  val s2_is_replay = RegNext(s1_is_replay) && s2_valid
+  val s2_tlb_resp = RegEnable(s1_tlb_resp, s1_valid)
+  val s2_tlb_miss = RegEnable(s1_tlb_miss, s1_valid)
+  val s2_is_replay = RegEnable(s1_is_replay, s1_valid) && s2_valid
   val s2_xcpt = s2_valid && (s2_tlb_resp.ae.inst || s2_tlb_resp.pf.inst) && !s2_is_replay
-  val s2_btb_resp = RegNext(btb.io.resp)
+  val s2_btb_resp = RegEnable(btb.io.resp, s1_valid)
   val f3_ready = Wire(Bool())
 
   icache.io.s2_kill := s2_xcpt
 
   val f2_fetch_mask = fetchMask(s2_vpc)
-  val f2_next_fetch = RegNext(f1_next_fetch)
+  val f2_next_fetch = RegEnable(f1_next_fetch, s1_valid)
+  val f2_f1_predicted_target = RegEnable(f1_predicted_target, s1_valid)
 
 
   val f2_aligned_pc = fetchAlign(s2_vpc)
@@ -212,8 +215,8 @@ class ShuttleFrontendModule(outer: ShuttleFrontend) extends LazyModuleImp(outer)
   val f2_do_redirect = WireInit(false.B)
   val f2_redirect_bridx = WireInit(0.U(log2Ceil(fetchWidth).W))
   val f2_predicted_target = Mux(f2_do_redirect,
-    Mux(f2_do_ret, ras(s2_ras_head), RegNext(f1_predicted_target)),
-    RegNext(f1_next_fetch))
+    Mux(f2_do_ret, ras(s2_ras_head), f2_f1_predicted_target),
+    f2_next_fetch)
 
 
   val ras_write_val = WireInit(false.B)
