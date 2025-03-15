@@ -165,7 +165,7 @@ class ShuttleTile private(
   frontend.resetVectorSinkNode := resetVectorNexusNode
 
   val nPTWPorts = 2 + roccs.map(_.nPTWPorts).sum
-  val dcache = LazyModule(new ShuttleDCache(tileId, ShuttleDCacheParams())(p))
+  val dcache = LazyModule(new ShuttleDCache(tileId, shuttleParams.dcacheParams)(p))
   (tlMasterXbar.node
     := TLBuffer()
     := tcmAdjusterNode(shuttleParams.tcm)
