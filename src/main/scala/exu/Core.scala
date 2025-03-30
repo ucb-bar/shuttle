@@ -196,7 +196,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       vec_decoder.io.inst := r.bits.inst
       vec_decoder.io.vconfig := rrd_vcfg.get
       when (vec_decoder.io.legal) {
-        l.bits.ctrl.legal := !rrd_vcfg.get.vtype.vill
+        l.bits.ctrl.legal := true.B
         l.bits.ctrl.fp := vec_decoder.io.fp
         l.bits.ctrl.rocc := false.B
         l.bits.ctrl.branch := false.B
@@ -251,8 +251,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     rrd_illegal_insn(i) := (!ctrl.legal ||
       (ctrl.fp && fp_illegal) ||
       (ctrl.rocc && csr.io.decode(i).rocc_illegal) ||
-      (uop.sets_vcfg && csr.io.decode(0).vector_illegal) ||
-      (ctrl.vec && (csr.io.decode(0).vector_illegal || rrd_vcfg.map(_.vtype.vill).getOrElse(true.B))) ||
+      ((ctrl.vec || uop.sets_vcfg) && csr.io.decode(0).vector_illegal) ||
       (csr_en && (csr_ren_illegal || csr_wen_illegal)) ||
       (!uop.rvc && ((sfence || system_insn) && csr.io.decode(i).system_illegal))
     )
