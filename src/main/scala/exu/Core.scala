@@ -1017,7 +1017,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     val trace = WireInit(csr.io.trace)
     for (i <- 0 until retireWidth) {
       val pc = if (usingVector) Mux(io.vector.get.com.retire_late, io.vector.get.com.pc, com_uops(i).bits.pc) else com_uops(i).bits.pc
-      trace(i).valid := com_retire(i) || ((i == 0).B && csr.io.exception)
+      trace(i).valid := com_retire(i) || ((i == 0).B && (csr.io.exception || io.vector.map(_.com.retire_late).getOrElse(false.B)))
       trace(i).wdata.get := com_uops(i).bits.wdata.bits
       trace(i).iaddr := pc
       val ctrl = com_uops(i).bits.ctrl
@@ -1191,6 +1191,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   if (shuttleParams.enableTraceCoreIngress) {
     for (i <- 0 until retireWidth) {
       val trace_ingress = Module(new TraceCoreIngress(traceIngressParams))
+      // TODO: This is broken with vectors
       trace_ingress.io.in.valid := com_retire(i) || csr.io.trace(i).exception
       trace_ingress.io.in.taken := com_uops_reg(i).bits.taken
       trace_ingress.io.in.is_branch := com_uops_reg(i).bits.ctrl.branch
