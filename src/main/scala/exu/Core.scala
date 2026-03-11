@@ -29,8 +29,8 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val shuttleParams = coreParams.asInstanceOf[ShuttleCoreParams]
   val nTotalRoCCCSRs = tile.roccCSRs.flatten.size
 
-  def traceIngressParams = TraceCoreParams(nGroups = coreParams.retireWidth, iretireWidth = coreParams.retireWidth, 
-                                          xlen = coreParams.xLen, iaddrWidth = coreParams.xLen) 
+  def traceIngressParams = TraceCoreParams(nGroups = coreParams.retireWidth, iretireWidth = 1, 
+                                          xlen = coreParams.xLen, iaddrWidth = vaddrBitsExtended) 
 
   val io = IO(new Bundle {
     val hartid = Input(UInt(hartIdLen.W))

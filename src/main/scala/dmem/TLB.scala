@@ -155,9 +155,9 @@ class ShuttleDTLB(ports: Int, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: TLE
     val prot_eff = pma.io.resp.eff
 
     // hit check
-    val sector_hits = sectored_entries(memIdx).map(_.sectorHit(vpn, false.B))
-    val superpage_hits = superpage_entries.map(_.hit(vpn, false.B))
-    val hitsVec = all_entries.map(vm_enabled && _.hit(vpn, false.B))
+    val sector_hits = sectored_entries(memIdx).map(_.sectorHit(vpn, false.B, io.ptw.ptbr.asid))
+    val superpage_hits = superpage_entries.map(_.hit(vpn, false.B, io.ptw.ptbr.asid))
+    val hitsVec = all_entries.map(vm_enabled && _.hit(vpn, false.B, io.ptw.ptbr.asid))
     val real_hits = hitsVec.asUInt
     val hits = Cat(!vm_enabled, real_hits)
 
@@ -194,7 +194,7 @@ class ShuttleDTLB(ports: Int, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: TLE
       when (io.ptw.resp.bits.level < (pgLevels-1).U) {
         val waddr = r_superpage_repl_addr
         for ((e, i) <- superpage_entries.zipWithIndex) when (r_superpage_repl_addr === i.U) {
-          e.insert(r_refill_tag, refill_v, io.ptw.resp.bits.level, newEntry)
+          e.insert(r_refill_tag, refill_v, io.ptw.resp.bits.level, newEntry, io.ptw.ptbr.asid)
           when (invalidate_refill) { e.invalidate() }
         }
         // refill sectored_hit
@@ -203,7 +203,7 @@ class ShuttleDTLB(ports: Int, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: TLE
         val waddr = Mux(r_sectored_hit.valid, r_sectored_hit.bits, r_sectored_repl_addr)
         for ((e, i) <- sectored_entries(r_memIdx).zipWithIndex) when (waddr === i.U) {
           when (!r_sectored_hit.valid) { e.invalidate() }
-          e.insert(r_refill_tag, refill_v, 0.U, newEntry)
+          e.insert(r_refill_tag, refill_v, 0.U, newEntry, io.ptw.ptbr.asid)
           when (invalidate_refill) { e.invalidate() }
         }
       }

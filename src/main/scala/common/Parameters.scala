@@ -30,7 +30,8 @@ case class ShuttleCoreParams(
   fetchWidth: Int = 4,
   debugROB: Boolean = false,
   vector: Option[ShuttleCoreVectorParams] = None,
-  enableTraceCoreIngress: Boolean = false
+  enableTraceCoreIngress: Boolean = false,
+  override val asidLen: Int = 0
 ) extends CoreParams
 {
   require(Seq(4, 8, 16, 32).contains(fetchWidth))
