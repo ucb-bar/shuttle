@@ -1213,6 +1213,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
       io.trace_core_ingress.get.group(i) <> trace_ingress.io.out
       io.trace_core_ingress.get.priv := csr.io.trace(i).priv 
+      io.trace_core_ingress.get.ctx := csr.io.ptbr.asid
       io.trace_core_ingress.get.tval := csr.io.tval
       io.trace_core_ingress.get.cause := csr.io.cause
       io.trace_core_ingress.get.time := csr.io.time
