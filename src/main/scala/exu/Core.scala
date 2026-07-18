@@ -1003,7 +1003,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       csr.io.pc := io_v.com.pc
       csr.io.retire := io_v.com.retire_late
       csr.io.inst(0) := io_v.com.inst
-      when (io_v.com.xcpt && !(com_uops_reg(0).valid && com_uops(0).bits.xcpt)) {
+      when (io_v.com.xcpt) {
         csr.io.exception := true.B
         csr.io.tval := io_v.com.tval
         csr.io.cause := io_v.com.cause
