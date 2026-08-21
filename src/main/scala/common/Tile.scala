@@ -145,7 +145,9 @@ class ShuttleTile private(
     tcm_master_replicator.node := TLFilter(TLFilter.mSubtract(AddressSet(tcmParams.base, replicationSize-1)))
   } .getOrElse { TLEphemeralNode() }
 
-
+  def connectTLSlaveAtTileBeatBytes(node: TLNode): Unit = {
+    node := TLFragmenter(shuttleParams.tileBeatBytes, cacheBlockBytes, earlyAck=EarlyAck.PutFulls) := tlSlaveXbar.node
+  }
 
   val roccs = p(BuildRoCC).map(_(p))
 
@@ -218,7 +220,7 @@ class ShuttleTile private(
 
   val trace_encoder_controller = shuttleParams.traceParams.map { t =>
     val trace_encoder_controller = LazyModule(new TraceEncoderController(t.encoderBaseAddr, shuttleParams.tileBeatBytes, tileId))
-    connectTLSlave(trace_encoder_controller.node, shuttleParams.tileBeatBytes)
+    trace_encoder_controller.node := TLFragmenter(shuttleParams.tileBeatBytes, cacheBlockBytes, earlyAck=EarlyAck.PutFulls) := tlSlaveXbar.node
     trace_encoder_controller
   }
 
@@ -377,52 +379,55 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
 
         assert(!(rocc.module.io.mem.req.valid && !rocc.module.io.mem.req.bits.phys))
 
-        dcachePorts(i + 2).req.valid := rocc.module.io.mem.req.valid
-        dcachePorts(i + 2).req.bits.addr := rocc.module.io.mem.req.bits.addr
-        dcachePorts(i + 2).req.bits.tag := rocc.module.io.mem.req.bits.tag
-        dcachePorts(i + 2).req.bits.cmd := rocc.module.io.mem.req.bits.cmd
-        dcachePorts(i + 2).req.bits.size := rocc.module.io.mem.req.bits.size
-        dcachePorts(i + 2).req.bits.signed := rocc.module.io.mem.req.bits.signed
-        dcachePorts(i + 2).req.bits.data := rocc.module.io.mem.req.bits.data
-        dcachePorts(i + 2).req.bits.mask := rocc.module.io.mem.req.bits.mask
-        rocc.module.io.mem.req.ready := dcachePorts(i + 2).req.ready
+        val simple = Module(new SimpleHellaCacheIF()(outer.p))
+        simple.io.requestor <> rocc.module.io.mem
 
-        dcachePorts(i + 2).s1_paddr := RegEnable(rocc.module.io.mem.req.bits.addr, rocc.module.io.mem.req.valid)
-        dcachePorts(i + 2).s1_kill := rocc.module.io.mem.s1_kill
-        dcachePorts(i + 2).s1_data.data := rocc.module.io.mem.req.bits.data
+        dcachePorts(i + 2).req.valid := simple.io.cache.req.valid
+        dcachePorts(i + 2).req.bits.addr := simple.io.cache.req.bits.addr
+        dcachePorts(i + 2).req.bits.tag := simple.io.cache.req.bits.tag
+        dcachePorts(i + 2).req.bits.cmd := simple.io.cache.req.bits.cmd
+        dcachePorts(i + 2).req.bits.size := simple.io.cache.req.bits.size
+        dcachePorts(i + 2).req.bits.signed := simple.io.cache.req.bits.signed
+        dcachePorts(i + 2).req.bits.data := simple.io.cache.req.bits.data
+        dcachePorts(i + 2).req.bits.mask := simple.io.cache.req.bits.mask
+        simple.io.cache.req.ready := dcachePorts(i + 2).req.ready
+
+        dcachePorts(i + 2).s1_paddr := RegEnable(simple.io.cache.req.bits.addr, simple.io.cache.req.valid)
+        dcachePorts(i + 2).s1_kill := simple.io.cache.s1_kill
+        dcachePorts(i + 2).s1_data := simple.io.cache.s1_data
         dcachePorts(i + 2).s1_data.mask := DontCare
-        rocc.module.io.mem.s2_nack := dcachePorts(i + 2).s2_nack
-        dcachePorts(i + 2).s2_kill := rocc.module.io.mem.s2_kill
+        simple.io.cache.s2_nack := dcachePorts(i + 2).s2_nack
+        dcachePorts(i + 2).s2_kill := simple.io.cache.s2_kill
 
-        rocc.module.io.mem.resp.valid := dcachePorts(i + 2).resp.valid
-        rocc.module.io.mem.resp.bits := DontCare
-        rocc.module.io.mem.resp.bits.has_data := true.B
-        rocc.module.io.mem.resp.bits.tag := dcachePorts(i + 2).resp.bits.tag
-        rocc.module.io.mem.resp.bits.data := dcachePorts(i + 2).resp.bits.data
-        rocc.module.io.mem.resp.bits.size := dcachePorts(i + 2).resp.bits.size
-        rocc.module.io.mem.ordered := dcachePorts(i + 2).ordered
-        dcachePorts(i + 2).keep_clock_enabled := rocc.module.io.mem.keep_clock_enabled
-        rocc.module.io.mem.clock_enabled := dcachePorts(i + 2).clock_enabled
-        rocc.module.io.mem.perf := dcachePorts(i + 2).perf
-        rocc.module.io.mem.s2_nack_cause_raw := false.B
-        rocc.module.io.mem.s2_uncached := false.B
-        rocc.module.io.mem.replay_next := false.B
-        rocc.module.io.mem.s2_gpa := false.B
-        rocc.module.io.mem.s2_gpa_is_pte := false.B
-        rocc.module.io.mem.store_pending := false.B
+        simple.io.cache.resp.valid := dcachePorts(i + 2).resp.valid
+        simple.io.cache.resp.bits := DontCare
+        simple.io.cache.resp.bits.has_data := true.B
+        simple.io.cache.resp.bits.tag := dcachePorts(i + 2).resp.bits.tag
+        simple.io.cache.resp.bits.data := dcachePorts(i + 2).resp.bits.data
+        simple.io.cache.resp.bits.size := dcachePorts(i + 2).resp.bits.size
+        simple.io.cache.ordered := dcachePorts(i + 2).ordered
+        dcachePorts(i + 2).keep_clock_enabled := simple.io.cache.keep_clock_enabled
+        simple.io.cache.clock_enabled := dcachePorts(i + 2).clock_enabled
+        simple.io.cache.perf := dcachePorts(i+2).perf
+        simple.io.cache.s2_nack_cause_raw := false.B
+        simple.io.cache.s2_uncached := false.B
+        simple.io.cache.replay_next := false.B
+        simple.io.cache.s2_gpa := false.B
+        simple.io.cache.s2_gpa_is_pte := false.B
+        simple.io.cache.store_pending := false.B
 
-        val rocc_s2_addr = Pipe(rocc.module.io.mem.req.fire, rocc.module.io.mem.req.bits.addr, 2).bits
+        val rocc_s2_addr = Pipe(simple.io.cache.req.fire, simple.io.cache.req.bits.addr, 2).bits
         val rocc_s2_legal = edge.manager.findSafe(rocc_s2_addr).reduce(_||_)
-        rocc.module.io.mem.s2_paddr := rocc_s2_addr
-        rocc.module.io.mem.s2_xcpt.ae.ld := !(rocc_s2_legal &&
+        simple.io.cache.s2_paddr := rocc_s2_addr
+        simple.io.cache.s2_xcpt.ae.ld := !(rocc_s2_legal &&
           edge.manager.fastProperty(rocc_s2_addr, p => TransferSizes.asBool(p.supportsGet), (b: Boolean) => b.B))
-        rocc.module.io.mem.s2_xcpt.ae.st := false.B
-        rocc.module.io.mem.s2_xcpt.pf.ld := false.B
-        rocc.module.io.mem.s2_xcpt.pf.st := false.B
-        rocc.module.io.mem.s2_xcpt.gf.ld := false.B
-        rocc.module.io.mem.s2_xcpt.gf.st := false.B
-        rocc.module.io.mem.s2_xcpt.ma.ld := false.B
-        rocc.module.io.mem.s2_xcpt.ma.st := false.B
+        simple.io.cache.s2_xcpt.ae.st := false.B
+        simple.io.cache.s2_xcpt.pf.ld := false.B
+        simple.io.cache.s2_xcpt.pf.st := false.B
+        simple.io.cache.s2_xcpt.gf.ld := false.B
+        simple.io.cache.s2_xcpt.gf.st := false.B
+        simple.io.cache.s2_xcpt.ma.ld := false.B
+        simple.io.cache.s2_xcpt.ma.st := false.B
       }
       val nFPUPorts = outer.roccs.count(_.usesFPU)
       if (nFPUPorts > 0) {
