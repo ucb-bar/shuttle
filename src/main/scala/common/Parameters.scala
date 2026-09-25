@@ -17,7 +17,9 @@ case class ShuttleCoreVectorParams(
   vfh: Boolean,
   decoder: Parameters => RocketVectorDecoder,
   issueVConfig: Boolean,
-  vExts: Seq[String])
+  vExts: Seq[String],
+  matrixTE: Int = 0,                    // Xsfmm/VME tile edge (TEW=32); 0 = none
+  matrixTypes: Seq[(Int, Int)] = Nil)   // supported (SEW, TWIDEN) matrix configs
 
 
 case class ShuttleCoreParams(
@@ -80,5 +82,7 @@ case class ShuttleCoreParams(
   override def vfLen = vector.map(_.vfLen).getOrElse(0)
   override def vfh = vector.map(_.vfh).getOrElse(false)
   override def vExts = vector.map(_.vExts).getOrElse(Nil)
+  override def matrixTE = vector.map(_.matrixTE).getOrElse(0)
+  override def matrixTypes = vector.map(_.matrixTypes).getOrElse(Nil)
   val traceHasWdata: Boolean = debugROB
 }

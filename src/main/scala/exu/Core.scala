@@ -176,6 +176,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       (usingSupervisor.option(new SDecode)) ++:
       (usingDebug.option(new DebugDecode)) ++:
       (usingVector.option(new VCFGDecode)) ++:
+      (usingMatrix.option(new MatrixCFGDecode)) ++:
       (usingNMI.option(new NMIDecode)) ++:
       Seq(new FenceIDecode(false)) ++:
       Seq(new ZbaDecode, new Zba64Decode, new ZbbDecode, new Zbb64Decode, new ZbsDecode) ++:
@@ -190,7 +191,8 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
     l.bits.ctrl.decode(r.bits.inst, decode_table)
     l.bits.fp_ctrl := fp_decode(r.bits.inst)
-    l.bits.sets_vcfg := Seq(Instructions.VSETVLI, Instructions.VSETIVLI, Instructions.VSETVL).map(_ === r.bits.inst).orR && usingVector.B
+    l.bits.sets_vcfg := (Seq(Instructions.VSETVLI, Instructions.VSETIVLI, Instructions.VSETVL).map(_ === r.bits.inst).orR && usingVector.B) ||
+      (MatrixConfig.isCfg(r.bits.inst) && usingMatrix.B)
     if (usingVector) {
       val vec_decoder = shuttleParams.vector.get.decoder(p)
       vec_decoder.io.inst := r.bits.inst
@@ -529,10 +531,15 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       ),
       ex_setvcfg_uop.inst(19,15))
 
-    val ex_new_vl = ex_new_vtype.vl(ex_avl, ex_vcfg.get.bits.vl, false.B, false.B, false.B)
+    val ex_std_vl = ex_new_vtype.vl(ex_avl, ex_vcfg.get.bits.vl, false.B, false.B, false.B)
+    // Xsfmm sf.vsettn/m/k update tn/tm/tk of the current vconfig; rd gets the new value
+    val ex_is_mcfg = MatrixConfig.isCfg(ex_setvcfg_uop.inst) && usingMatrix.B
+    val (ex_mcfg, ex_mcfg_rd) = MatrixConfig.update(ex_setvcfg_uop.inst, ex_setvcfg_uop.rs1_data, ex_vcfg.get.bits)
+    val ex_new_vl = Mux(ex_is_mcfg, ex_mcfg_rd, ex_std_vl)
     when (ex_setvcfg_valid.orR) {
       ex_vcfg_out.get.bits.vtype := ex_new_vtype
-      ex_vcfg_out.get.bits.vl := ex_new_vl
+      ex_vcfg_out.get.bits.vl := ex_std_vl
+      when (ex_is_mcfg) { ex_vcfg_out.get.bits := ex_mcfg }
     }
     Some(ex_new_vl)
   } else {
