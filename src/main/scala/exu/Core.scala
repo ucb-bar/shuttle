@@ -1196,10 +1196,18 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
 
   // trace ingress
   if (shuttleParams.enableTraceCoreIngress) {
+    // A trap is only ever taken on lane 0: issue-time xcpts and system insns are
+    // pipe0-only, and a lane>0 memory fault is replayed rather than taken. The
+    // CSR flags trace(i).exception for every lane i <= retire, and ecall/ebreak
+    // commit with retire=1, so without the lane-0 gate lane 1 would emit a
+    // phantom trap from its stale uop.
+    assert(!(csr.io.trace(0).exception && com_retire.drop(1).foldLeft(false.B)(_ || _)),
+      "trace: a lane younger than the trapping lane 0 retired in the same cycle")
     for (i <- 0 until retireWidth) {
       val trace_ingress = Module(new TraceCoreIngress(traceIngressParams))
+      val trace_xcpt = csr.io.trace(i).exception && (i == 0).B
       // TODO: This is broken with vectors
-      trace_ingress.io.in.valid := com_retire(i) || csr.io.trace(i).exception
+      trace_ingress.io.in.valid := com_retire(i) || trace_xcpt
       trace_ingress.io.in.taken := com_uops_reg(i).bits.taken
       trace_ingress.io.in.is_branch := com_uops_reg(i).bits.ctrl.branch
       trace_ingress.io.in.is_jal := com_uops_reg(i).bits.ctrl.jal
@@ -1207,8 +1215,8 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       trace_ingress.io.in.insn := com_uops_reg(i).bits.inst
       trace_ingress.io.in.pc := com_uops_reg(i).bits.pc
       trace_ingress.io.in.is_compressed := !com_uops_reg(i).bits.raw_inst(1, 0).andR // 2'b11 is uncompressed, everything else is compressed
-      trace_ingress.io.in.interrupt := csr.io.trace(i).interrupt && csr.io.trace(i).exception
-      trace_ingress.io.in.exception := !csr.io.trace(i).interrupt && csr.io.trace(i).exception
+      trace_ingress.io.in.interrupt := csr.io.trace(i).interrupt && trace_xcpt
+      trace_ingress.io.in.exception := !csr.io.trace(i).interrupt && trace_xcpt
       trace_ingress.io.in.trap_return := csr.io.trap_return
 
       io.trace_core_ingress.get.group(i) <> trace_ingress.io.out
