@@ -192,7 +192,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     l.bits.ctrl.decode(r.bits.inst, decode_table)
     l.bits.fp_ctrl := fp_decode(r.bits.inst)
     l.bits.sets_vcfg := (Seq(Instructions.VSETVLI, Instructions.VSETIVLI, Instructions.VSETVL).map(_ === r.bits.inst).orR && usingVector.B) ||
-      (MatrixConfig.isCfg(r.bits.inst) && usingMatrix.B)
+      ((MatrixConfig.isCfg(r.bits.inst) || MatrixConfig.isMsetmtype(r.bits.inst)) && usingMatrix.B)
     if (usingVector) {
       val vec_decoder = shuttleParams.vector.get.decoder(p)
       vec_decoder.io.inst := r.bits.inst
@@ -521,18 +521,24 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   val ex_setvcfg_valid = ex_uops_reg.map(r => r.valid && r.bits.sets_vcfg)
   val ex_setvcfg_uop = Mux1H(ex_setvcfg_valid, ex_uops_reg).bits
   val ex_new_vl = if (usingVector) {
+    // sf.msetmtype (real Zvt): rs1[1:0] is the vtwiden code, rs2 is vsew<<3|altfmt<<8
+    // -- pack them into the same vtype-embedded immediate layout VType.fromUInt
+    // already expects from vsetvli's own immediate/rs2 forms (see MatrixConfig
+    // .msetmtypeNewType's comment, and RocketCore.scala's mirror of this).
+    val ex_is_msetmtype = usingMatrix.B && MatrixConfig.isMsetmtype(ex_setvcfg_uop.inst)
     val ex_new_vtype = VType.fromUInt(MuxCase(ex_setvcfg_uop.rs2_data, Seq(
+      ex_is_msetmtype                -> MatrixConfig.msetmtypeNewType(ex_setvcfg_uop.rs1_data, ex_setvcfg_uop.rs2_data),
       ex_setvcfg_uop.inst(31,30).andR -> ex_setvcfg_uop.inst(29,20),
       !ex_setvcfg_uop.inst(31)        -> ex_setvcfg_uop.inst(30,20))))
-    val ex_avl = Mux(ex_setvcfg_uop.ctrl.rxs1,
+    val ex_avl = Mux(ex_is_msetmtype, 0.U, Mux(ex_setvcfg_uop.ctrl.rxs1,
       Mux(ex_setvcfg_uop.inst(19,15) === 0.U,
         Mux(ex_setvcfg_uop.inst(11,7) === 0.U, ex_vcfg.get.bits.vl, ex_new_vtype.vlMax),
         ex_setvcfg_uop.rs1_data,
       ),
-      ex_setvcfg_uop.inst(19,15))
+      ex_setvcfg_uop.inst(19,15)))
 
     val ex_std_vl = ex_new_vtype.vl(ex_avl, ex_vcfg.get.bits.vl, false.B, false.B, false.B)
-    // Xsfmm sf.vsettn/m/k update tn/tm/tk of the current vconfig; rd gets the new value
+    // sf.msettn/m/k update tn/tm/tk of the current vconfig; rd gets the new value
     val ex_is_mcfg = MatrixConfig.isCfg(ex_setvcfg_uop.inst) && usingMatrix.B
     val (ex_mcfg, ex_mcfg_rd) = MatrixConfig.update(ex_setvcfg_uop.inst, ex_setvcfg_uop.rs1_data, ex_vcfg.get.bits)
     val ex_new_vl = Mux(ex_is_mcfg, ex_mcfg_rd, ex_std_vl)
