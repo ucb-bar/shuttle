@@ -145,7 +145,9 @@ class ShuttleTile private(
     tcm_master_replicator.node := TLFilter(TLFilter.mSubtract(AddressSet(tcmParams.base, replicationSize-1)))
   } .getOrElse { TLEphemeralNode() }
 
-
+  def connectTLSlaveAtTileBeatBytes(node: TLNode): Unit = {
+    node := TLFragmenter(shuttleParams.tileBeatBytes, cacheBlockBytes, earlyAck=EarlyAck.PutFulls) := tlSlaveXbar.node
+  }
 
   val roccs = p(BuildRoCC).map(_(p))
 
@@ -218,7 +220,7 @@ class ShuttleTile private(
 
   val trace_encoder_controller = shuttleParams.traceParams.map { t =>
     val trace_encoder_controller = LazyModule(new TraceEncoderController(t.encoderBaseAddr, shuttleParams.tileBeatBytes, tileId))
-    connectTLSlave(trace_encoder_controller.node, shuttleParams.tileBeatBytes)
+    trace_encoder_controller.node := TLFragmenter(shuttleParams.tileBeatBytes, cacheBlockBytes, earlyAck=EarlyAck.PutFulls) := tlSlaveXbar.node
     trace_encoder_controller
   }
 
@@ -471,6 +473,7 @@ class ShuttleTileModuleImp(outer: ShuttleTile) extends BaseTileModuleImp(outer)
     core.io.trace_core_ingress.get <> outer.trace_encoder.get.module.io.in
     outer.trace_encoder_controller.foreach { lm =>
       outer.trace_encoder.get.module.io.control <> lm.module.io.control
+      lm.module.io.perf.stall := outer.trace_encoder.get.module.io.stall
     }
 
     val trace_sink_arbiter = Module(new TraceSinkArbiter(outer.traceSinkIds, 
