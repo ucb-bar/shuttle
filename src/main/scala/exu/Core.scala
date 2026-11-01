@@ -192,7 +192,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     l.bits.ctrl.decode(r.bits.inst, decode_table)
     l.bits.fp_ctrl := fp_decode(r.bits.inst)
     l.bits.sets_vcfg := (Seq(Instructions.VSETVLI, Instructions.VSETIVLI, Instructions.VSETVL).map(_ === r.bits.inst).orR && usingVector.B) ||
-      ((MatrixConfig.isCfg(r.bits.inst) || MatrixConfig.isMsetmtype(r.bits.inst)) && usingMatrix.B)
+      ((MatrixConfig.isCfg(r.bits.inst) || MatrixConfig.isMsetmtype(r.bits.inst) || MatrixConfig.isMsetmtypei(r.bits.inst)) && usingMatrix.B)
     if (usingVector) {
       val vec_decoder = shuttleParams.vector.get.decoder(p)
       vec_decoder.io.inst := r.bits.inst
@@ -410,6 +410,28 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   }
 
   val fsboard_bsy = Wire(Bool())
+  // A vconfig update is still in flight (not yet guaranteed to have reached
+  // the architectural CSR) whenever any of ex/mem/com_vcfg is valid.
+  // rrd_vcfg's ex_vcfg_out/mem_vcfg/com_vcfg forwarding chain is meant to
+  // cover this, but that chain's validity is tracked independently of
+  // com_retire (which also checks xcpt/needs_replay per lane) -- if those
+  // ever diverge for the vconfig-setting instruction, a consumer (a real
+  // vector op, or another vconfig-setting instruction reading `cur` via
+  // MatrixConfig.update) could read a value that never lands in the CSR.
+  // Stalling here removes any dependence on that forwarding chain's
+  // edge-case timing, mirroring RocketCore.scala's id_vconfig_hazard.
+  //
+  // Measured: a tightly-packed real-vsetvli -> msetmtypei x2 -> msettm ->
+  // msettk -> msettn sequence (no compiler-inserted spacing between steps,
+  // as mmt4d_zvt_s8.c's monolithic asm block emits) still ends with
+  // vtype.vill=1 even with the plain (ex/mem/com).valid check above --
+  // the same sequence spaced out across separate calls never fails. That
+  // points at an extra cycle of latency between com_vcfg going invalid and
+  // the CSR write (gated by com_retire, checked a stage later) actually
+  // landing. Remembering com_vcfg's validity for one more cycle closes
+  // that gap by construction, regardless of the exact mechanism.
+  val com_vcfg_valid_prev = if (usingVector) RegNext(com_vcfg.get.valid, false.B) else false.B
+  val vcfg_inflight = if (usingVector) (ex_vcfg.get.valid || mem_vcfg.get.valid || com_vcfg.get.valid || com_vcfg_valid_prev) else false.B
   var stall_due_to_older = false.B
   var rrd_found_mem = false.B
   var rrd_found_setvcfg = false.B
@@ -449,6 +471,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
       (is_pipe0 && (i != 0).B)                 ||
       (rrd_found_mem && ctrl.mem)              ||
       (rrd_found_setvcfg && uop.sets_vcfg)     ||
+      (vcfg_inflight && (ctrl.vec || uop.sets_vcfg)) ||
       (rrd_found_brjmp && brjmp)               ||
       (stall_due_to_older)                     ||
       (csr.io.csr_stall)                       ||
@@ -525,12 +548,16 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     // -- pack them into the same vtype-embedded immediate layout VType.fromUInt
     // already expects from vsetvli's own immediate/rs2 forms (see MatrixConfig
     // .msetmtypeNewType's comment, and RocketCore.scala's mirror of this).
+    // sf.msetmtypei packs the same fields into immediate bits instead of
+    // registers (see MatrixConfig.msetmtypeiNewType).
     val ex_is_msetmtype = usingMatrix.B && MatrixConfig.isMsetmtype(ex_setvcfg_uop.inst)
+    val ex_is_msetmtypei = usingMatrix.B && MatrixConfig.isMsetmtypei(ex_setvcfg_uop.inst)
     val ex_new_vtype = VType.fromUInt(MuxCase(ex_setvcfg_uop.rs2_data, Seq(
       ex_is_msetmtype                -> MatrixConfig.msetmtypeNewType(ex_setvcfg_uop.rs1_data, ex_setvcfg_uop.rs2_data),
+      ex_is_msetmtypei                -> MatrixConfig.msetmtypeiNewType(ex_setvcfg_uop.inst),
       ex_setvcfg_uop.inst(31,30).andR -> ex_setvcfg_uop.inst(29,20),
       !ex_setvcfg_uop.inst(31)        -> ex_setvcfg_uop.inst(30,20))))
-    val ex_avl = Mux(ex_is_msetmtype, 0.U, Mux(ex_setvcfg_uop.ctrl.rxs1,
+    val ex_avl = Mux(ex_is_msetmtype || ex_is_msetmtypei, 0.U, Mux(ex_setvcfg_uop.ctrl.rxs1,
       Mux(ex_setvcfg_uop.inst(19,15) === 0.U,
         Mux(ex_setvcfg_uop.inst(11,7) === 0.U, ex_vcfg.get.bits.vl, ex_new_vtype.vlMax),
         ex_setvcfg_uop.rs1_data,
