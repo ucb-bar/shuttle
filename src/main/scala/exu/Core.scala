@@ -894,7 +894,15 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
   for (t <- floatTypes) {
     val tag = com_fp_divsqrt_ctrl.typeTagOut
     val divSqrt = Module(new hardfloat.DivSqrtRecFN_small(t.exp, t.sig, 0))
-    divSqrt.io.inValid := com_uops_reg(0).valid && tag === typeTag(t).U && com_fp_divsqrt_valid && !divSqrt_val
+    // Only start the divider for an instruction that actually retires this cycle. An fdiv/fsqrt that reaches
+    // commit carrying an exception/interrupt, a replay, or a kill is not retired (no fsboard reservation), but
+    // used to be issued anyway; its result then landed in f[rd] during the trap handler with no reservation
+    // (assert(!fsboard(ll_fp_waddr)) in simulation, silent register corruption in hardware). This is the
+    // retire condition (see com_retire): the integer divider below only checks xcpt because its req/ready
+    // handshake stalls commit (no double issue on replay); this unit has no such handshake, so replay and
+    // kill must be excluded explicitly.
+    divSqrt.io.inValid := com_uops_reg(0).valid && tag === typeTag(t).U && com_fp_divsqrt_valid && !divSqrt_val &&
+      !com_uops(0).bits.xcpt && !com_uops(0).bits.needs_replay && !kill_com(0)
     divSqrt.io.sqrtOp := com_fp_divsqrt_ctrl.sqrt
     divSqrt.io.a := maxType.unsafeConvert(com_uops_reg(0).bits.fdivin.in1, t)
     divSqrt.io.b := maxType.unsafeConvert(com_uops_reg(0).bits.fdivin.in2, t)
