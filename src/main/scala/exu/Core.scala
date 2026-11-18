@@ -1333,8 +1333,8 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     io.vector.get.resp.ready := Mux(io.vector.get.resp.bits.fp,
       !fp_load_val && !(divSqrt_val && divSqrt_wdata.valid),
       ll_arb.io.in(3).ready)
-    when (!fp_load_val && (!divSqrt_val && divSqrt_wdata.valid)) {
-      ll_fp_wval := io.vector.get.resp.valid && io.vector.get.resp.bits.fp
+    when (io.vector.get.resp.fire && io.vector.get.resp.bits.fp) {
+      ll_fp_wval :=  true.B
       ll_fp_wdata := recode(io.vector.get.resp.bits.data, io.vector.get.resp.bits.size - typeTagWbOffset)
       ll_fp_waddr := io.vector.get.resp.bits.rd
     }
