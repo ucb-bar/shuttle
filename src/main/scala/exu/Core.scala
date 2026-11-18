@@ -369,10 +369,10 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     val rd_data_hazard  = (rd_older_hazard || rd_same_hazard) && ctrl.wxd && rd =/= 0.U
 
     // Detect FP hazards in the same packet here, to avoid partial stalls of the packet in EX
-    val frs1_same_hazard = (i == 0).B && rrd_uops.take(i).map { u => u.valid && u.bits.ctrl.wfd && u.bits.rd === rs1 }.orR && ctrl.rfs1
-    val frs2_same_hazard = (i == 0).B && rrd_uops.take(i).map { u => u.valid && u.bits.ctrl.wfd && u.bits.rd === rs2 }.orR && ctrl.rfs2
-    val frs3_same_hazard = (i == 0).B && rrd_uops.take(i).map { u => u.valid && u.bits.ctrl.wfd && u.bits.rd === rs3 }.orR && ctrl.rfs3
-    val frd_same_hazard  = (i == 0).B && rrd_uops.take(i).map { u => u.valid && u.bits.ctrl.wfd && u.bits.rd === rd  }.orR && ctrl.wfd
+    val frs1_same_hazard = rrd_uops.take(i).map { u => u.valid && u.bits.ctrl.wfd && u.bits.rd === rs1 }.orR && ctrl.rfs1
+    val frs2_same_hazard = rrd_uops.take(i).map { u => u.valid && u.bits.ctrl.wfd && u.bits.rd === rs2 }.orR && ctrl.rfs2
+    val frs3_same_hazard = rrd_uops.take(i).map { u => u.valid && u.bits.ctrl.wfd && u.bits.rd === rs3 }.orR && ctrl.rfs3
+    val frd_same_hazard  = rrd_uops.take(i).map { u => u.valid && u.bits.ctrl.wfd && u.bits.rd === rd  }.orR && ctrl.wfd
 
     rrd_stall_data(i) := (rs1_data_hazard || rs2_data_hazard || rd_data_hazard || frs1_same_hazard || frs2_same_hazard || frs3_same_hazard || frd_same_hazard)
     rrd_uops(i).bits.uses_memalu := rrd_uops(i).bits.uses_alu && ((rs1_w0_hit && rs1_can_forward_from_x_p0) || (rs2_w0_hit && rs2_can_forward_from_x_p0)) && enableMemALU.B && !sfb_shadow
