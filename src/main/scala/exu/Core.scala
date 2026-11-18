@@ -246,7 +246,8 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
     val sfence = ctrl.mem && ctrl.mem_cmd === M_SFENCE
     val system_insn = uop.system_insn
 
-    rrd_uops(i).bits.flush_pipe := sfence || system_insn || (csr_wen && csr.io.decode(i).write_flush)
+    // fence.i: refetch pc+4 so younger, possibly stale instructions do not retire
+    rrd_uops(i).bits.flush_pipe := sfence || system_insn || ctrl.fence_i || (csr_wen && csr.io.decode(i).write_flush)
 
     rrd_illegal_insn(i) := (!ctrl.legal ||
       (ctrl.fp && fp_illegal) ||
