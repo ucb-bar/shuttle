@@ -222,7 +222,7 @@ class ShuttleCore(tile: ShuttleTile, edge: TLEdgeOut)(implicit p: Parameters) ex
         l.bits.fp_ctrl.swap12 := false.B
         l.bits.fp_ctrl.toint := true.B
         l.bits.fp_ctrl.typeTagIn := I
-        l.bits.fp_ctrl.typeTagOut := Mux(rrd_vcfg.get.vtype.vsew === 3.U, D, S)
+        l.bits.fp_ctrl.typeTagOut := D
       }
     }
   }
